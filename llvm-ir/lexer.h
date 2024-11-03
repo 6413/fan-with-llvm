@@ -1,8 +1,8 @@
 #pragma once
 
 
-#include "llvm/IR/DIBuilder.h"
-#include "llvm/IR/IRBuilder.h"
+#include <llvm/IR/DIBuilder.h>
+#include <llvm/IR/IRBuilder.h>
 
 extern std::unique_ptr<llvm::IRBuilder<>> ir_builder;
 
@@ -40,19 +40,19 @@ enum token_e {
 };
 
 struct debug_info_t {
-  llvm::DICompileUnit* TheCU;
-  llvm::DIType* DblTy;
-  std::vector<llvm::DIScope*> LexicalBlocks;
+  llvm::DICompileUnit* di_compile_unit;
+  llvm::DIType* di_type;
+  std::vector<llvm::DIScope*> lexical_blocks;
 
   void emit_location(auto AST) {
     if constexpr (std::is_null_pointer_v<decltype(AST)>)
       return ir_builder->SetCurrentDebugLocation(llvm::DebugLoc());
     else {
       llvm::DIScope* Scope;
-      if (LexicalBlocks.empty())
-        Scope = TheCU;
+      if (lexical_blocks.empty())
+        Scope = di_compile_unit;
       else
-        Scope = LexicalBlocks.back();
+        Scope = lexical_blocks.back();
       ir_builder->SetCurrentDebugLocation(llvm::DILocation::get(
         Scope->getContext(), AST->getLine(), AST->getCol(), Scope));
     }
@@ -64,116 +64,115 @@ struct source_location_t {
   int line;
   int col;
 };
-inline source_location_t CurLoc;
-inline source_location_t LexLoc = { 1, 0 };
 
-inline std::string code_input = "";
+struct lexer_t {
+  int advance() {
+    int last_char = code_input[index++];
+    if (last_char == '\n' || last_char == '\r') {
+      lex_location.line++;
+      lex_location.col = 0;
+    }
+    else {
+      lex_location.col++;
+    }
 
-inline int index = 0;
-
-static int advance() {
-  int last_char = code_input.operator[](index);
-  ++index;
-  if (index >= code_input.size()) {
-    index = 0;
-    code_input.clear();
+    if (index >= code_input.size()) {
+      index = 0;
+      code_input.clear();
+    }
+    return last_char;
   }
 
-  if (last_char == '\n' || last_char == '\r') {
-    LexLoc.line++;
-    LexLoc.col = 0;
-  }
-  else
-    LexLoc.col++;
-  return last_char;
-}
+  int gettok() {
+    // Skip any whitespace.
+    while (isspace(last_char))
+      last_char = advance();
 
-inline static std::string identifier_string;
-inline static double double_value;
-inline static std::string string_value;
+    cursor_location = lex_location;
 
-static int g_last_char = ' ';
-/// gettok - Return the next token from standard input.
-static int gettok() {
-  // Skip any whitespace.
-  while (isspace(g_last_char))
-    g_last_char = advance();
+    // Identifier: [a-zA-Z_][a-zA-Z0-9_]*
+    if (isalpha(last_char) || last_char == '_') {
+      identifier_string = last_char;
+      while (isalnum(last_char = advance()) || last_char == '_')
+        identifier_string += last_char;
 
-  CurLoc = LexLoc;
+      if (identifier_string == "def")
+        return tok_definition;
+      if (identifier_string == "extern")
+        return tok_extern;
+      if (identifier_string == "if")
+        return tok_if;
+      if (identifier_string == "then")
+        return tok_then;
+      if (identifier_string == "else")
+        return tok_else;
+      if (identifier_string == "for")
+        return tok_for;
+      if (identifier_string == "in")
+        return tok_in;
+      if (identifier_string == "binary")
+        return tok_binary_operator;
+      if (identifier_string == "unary")
+        return tok_unary_operator;
+      if (identifier_string == "var")
+        return tok_variable;
+      if (identifier_string == "string")
+        return tok_type_string;
+      if (identifier_string == "double")
+        return tok_type_double;
+      return tok_identifier;
+    }
 
-  // Identifier: [a-zA-Z_][a-zA-Z0-9_]*
-  if (isalpha(g_last_char) || g_last_char == '_') {
-    identifier_string = g_last_char;
-    while (isalnum(g_last_char = advance()) || g_last_char == '_')
-      identifier_string += g_last_char;
+    // Number: [0-9.]+
+    if (isdigit(last_char) || last_char == '.') {
+      std::string num_str;
+      do {
+        num_str += last_char;
+        last_char = advance();
+      } while (isdigit(last_char) || last_char == '.');
 
-    if (identifier_string == "def")
-      return tok_definition;
-    if (identifier_string == "extern")
-      return tok_extern;
-    if (identifier_string == "if")
-      return tok_if;
-    if (identifier_string == "then")
-      return tok_then;
-    if (identifier_string == "else")
-      return tok_else;
-    if (identifier_string == "for")
-      return tok_for;
-    if (identifier_string == "in")
-      return tok_in;
-    if (identifier_string == "binary")
-      return tok_binary_operator;
-    if (identifier_string == "unary")
-      return tok_unary_operator;
-    if (identifier_string == "var")
-      return tok_variable;
-    if (identifier_string == "string")
-      return tok_type_string;
-    if (identifier_string == "double")
-      return tok_type_double;
-    return tok_identifier;
-  }
+      double_value = strtod(num_str.c_str(), nullptr);
+      return tok_number;
+    }
 
-  // Number: [0-9.]+
-  if (isdigit(g_last_char) || g_last_char == '.') {
-    std::string num_str;
-    do {
-      num_str += g_last_char;
-      g_last_char = advance();
-    } while (isdigit(g_last_char) || g_last_char == '.');
+    // String literal: "..."
+    if (last_char == '"') {
+      std::string str;
+      while ((last_char = advance()) != '"' && last_char != EOF)
+        str += last_char;
 
-    double_value = strtod(num_str.c_str(), nullptr);
-    return tok_number;
-  }
+      if (last_char == '"')
+        last_char = advance();
 
-  // String literal: "..."
-  if (g_last_char == '"') {
-    std::string str;
-    while ((g_last_char = advance()) != '"' && g_last_char != EOF)
-      str += g_last_char;
+      string_value = str;
+      return tok_literal_string;
+    }
 
-    if (g_last_char == '"')
-      g_last_char = advance();
+    // Comment until end of line.
+    if (last_char == '#') {
+      do
+        last_char = advance();
+      while (last_char != EOF && last_char != '\n' && last_char != '\r');
 
-    string_value = str;
-    return tok_literal_string;
-  }
+      if (last_char != EOF)
+        return gettok();
+    }
 
-  // Comment until end of line.
-  if (g_last_char == '#') {
-    do
-      g_last_char = advance();
-    while (g_last_char != EOF && g_last_char != '\n' && g_last_char != '\r');
+    // Check for end of file. Don't eat the EOF.
+    if (last_char == EOF)
+      return tok_eof;
 
-    if (g_last_char != EOF)
-      return gettok();
+    int this_char = last_char;
+    last_char = advance();
+    return this_char;
   }
 
-  // Check for end of file. Don't eat the EOF.
-  if (g_last_char == EOF)
-    return tok_eof;
-
-  int this_char = g_last_char;
-  g_last_char = advance();
-  return this_char;
-}
+  source_location_t cursor_location;
+  source_location_t lex_location = { 1, 0 };
+  std::string code_input = "";
+  std::string identifier_string;
+  std::string string_value;
+  double double_value;
+  int index = 0;
+  int last_char = ' ';
+};

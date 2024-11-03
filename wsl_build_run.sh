@@ -1,0 +1,1 @@
+clang++ -c llvm-ir/run.cpp -std=c++2a -I /mnt/c/libs/fan_release/include/fan -I /mnt/c/Users/0b347/Documents/GitHub -Dloco_imgui -DIMGUI_IMPL_OPENGL_LOADER_CUSTOM -DIMGUI_DEFINE_MATH_OPERATORS -I /usr/include/llvm-18/ -Dloco_json -w

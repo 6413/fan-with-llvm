@@ -83,7 +83,7 @@ extern "C" DLLEXPORT double clear() {
   return 0;
 }
 
-extern "C" DLLEXPORT double sleep(double x) {
+extern "C" DLLEXPORT double sleep_s(double x) {
   add_task([=] {
     needs_frame_skip = true;
     std::this_thread::sleep_for(std::chrono::duration<double>(x));

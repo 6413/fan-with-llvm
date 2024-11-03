@@ -1,17 +1,16 @@
-#include <pch.h>
 #include "run.h"
 
 #include <iostream>
 #include <memory>
 #include <vector>
-#include "llvm/ExecutionEngine/ExecutionEngine.h"
-#include "llvm/ExecutionEngine/GenericValue.h"
-#include "llvm/Support/TargetSelect.h"
-#include "llvm/TargetParser/Host.h"
-#include "llvm/Target/TargetMachine.h"
-#include "llvm/MC/TargetRegistry.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/IR/LegacyPassManager.h"
+#include <llvm/ExecutionEngine/ExecutionEngine.h>
+#include <llvm/ExecutionEngine/GenericValue.h>
+#include <llvm/Support/TargetSelect.h>
+#include <llvm/TargetParser/Host.h>
+#include <llvm/Target/TargetMachine.h>
+#include <llvm/MC/TargetRegistry.h>
+#include <llvm/Support/FileSystem.h>
+#include <llvm/IR/LegacyPassManager.h>
 
 #include "parser.h"
 #include "codegen.h"
@@ -22,17 +21,18 @@ extern debug_info_t KSDbgInfo;
 extern std::unique_ptr<llvm::Module> TheModule;
 extern std::unique_ptr<DIBuilder> DBuilder;
 
-void init_code() {
+void code_t::init_code() {
   InitializeNativeTarget();
   InitializeNativeTargetAsmPrinter();
   InitializeNativeTargetAsmParser();
 
-  KSDbgInfo.TheCU = nullptr;
-  KSDbgInfo.DblTy = nullptr;
-  KSDbgInfo.LexicalBlocks = {};
+  KSDbgInfo.di_compile_unit = nullptr;
+  KSDbgInfo.di_type = nullptr;
+  KSDbgInfo.lexical_blocks = {};
 
   TheContext = std::unique_ptr<LLVMContext>{};
   TheModule = std::unique_ptr<Module>{};
+  FunctionProtos = std::map<std::string, std::unique_ptr<ast_t::PrototypeAST>>{};
 
   codegen_init();
 
@@ -40,10 +40,10 @@ void init_code() {
   double_value = double();             // Filled in if tok_number
 
   CurTok = 0;
-  g_last_char = ' ';
+  last_char = ' ';
 
-  CurLoc = source_location_t();
-  LexLoc = source_location_t{ 1, 0 };
+  cursor_location = source_location_t();
+  lex_location = source_location_t{ 1, 0 };
 
   // Prime the first token.
   getNextToken();
@@ -65,7 +65,7 @@ void init_code() {
   // Create the compile unit for the module.
   // Currently down as "fib.ks" as a filename since we're redirecting stdin
   // but we'd like actual source locations.
-  KSDbgInfo.TheCU = DBuilder->createCompileUnit(
+  KSDbgInfo.di_compile_unit = DBuilder->createCompileUnit(
     dwarf::DW_LANG_C, DBuilder->createFile("fib.ks", "."), "Kaleidoscope Compiler", false, "", 0);
 
   {
@@ -84,7 +84,31 @@ void init_code() {
   }
 }
 
-int run_code() {
+/// top ::= definition | external | expression | ';'
+void code_t::main_loop() {
+  while (true) {
+    switch (CurTok) {
+    case tok_eof:
+      code_input.clear(); // clear buffer
+      return;
+    case ';': // ignore top-level semicolons.
+      getNextToken();
+      break;
+    case tok_definition:
+      HandleDefinition();
+      break;
+    case tok_extern:
+      HandleExtern();
+      break;
+    default:
+      HandleTopLevelExpression();
+      break;
+    }
+  }
+}
+
+
+int code_t::run_code() {
   auto start = std::chrono::steady_clock::now();
 
   // Create the JIT engine and move the module into it
@@ -141,95 +165,13 @@ int run_code() {
   std::vector<GenericValue> NoArgs;
   GenericValue GV = EE->runFunction(MainFn, NoArgs);
   //  std::stringstream oss;
-   // oss << "Result: " << std::fixed << std::setprecision(0) << GV.DoubleVal << std::endl;
+    // oss << "Result: " << std::fixed << std::setprecision(0) << GV.DoubleVal << std::endl;
     // Print the result
     //fan::printcl("result: ", GV.DoubleVal);
     //std::cout << "Result: " << std::fixed << std::setprecision(0) << GV.DoubleVal << std::endl;
 }
 
-
-//===----------------------------------------------------------------------===//
-// Top-Level parsing and JIT Driver
-//===----------------------------------------------------------------------===//
-
-static void HandleDefinition() {
-  if (auto FnAST = ParseDefinition()) {
-    if (!FnAST->codegen())
-      fprintf(stderr, "Error reading function definition:");
-  }
-  else {//
-    // Skip token for error recovery.
-    getNextToken();
-  }
-}
-
-static void HandleExtern() {
-  if (auto ProtoAST = ParseExtern()) {
-    if (!ProtoAST->codegen())
-      fprintf(stderr, "Error reading extern");
-    else
-      get_function_protos()[ProtoAST->getName()] = std::move(ProtoAST);
-  }
-  else {
-    // Skip token for error recovery.
-    getNextToken();
-  }
-}
-
-
-static void HandleTopLevelExpression() {
-  // Evaluate all top-level expressions
-  auto expressions = ParseTopLevelExpr();
-
-  // Create a prototype for 'main'
-  auto Proto = std::make_unique<PrototypeAST>(
-    CurLoc, "main", std::vector<std::string>(), std::vector<std::string>());
-
-  // Combine expressions into a single body
-  std::vector<std::unique_ptr<ExprAST>> BodyExpressions;
-  for (auto& expr : expressions) {
-    BodyExpressions.push_back(std::move(expr));
-  }
-  auto Body = std::make_unique<CompoundExprAST>(std::move(BodyExpressions));
-
-  auto fn_ast = std::make_unique<FunctionAST>(std::move(Proto), std::move(Body));
-  if (fn_ast) {
-    if (!fn_ast->codegen()) {
-      fprintf(stderr, "Error generating code for top level expr\n");
-    }
-  }
-  else {
-    // Skip token for error recovery.
-    getNextToken();
-  }
-}
-
-
-/// top ::= definition | external | expression | ';'
-void MainLoop() {
-  while (true) {
-    switch (CurTok) {
-    case tok_eof:
-      code_input.clear(); // clear buffer
-      return;
-    case ';': // ignore top-level semicolons.
-      getNextToken();
-      break;
-    case tok_definition:
-      HandleDefinition();
-      break;
-    case tok_extern:
-      HandleExtern();
-      break;
-    default:
-      HandleTopLevelExpression();
-      break;
-    }
-  }
-}
-
-
-void recompile_code() {
+void code_t::recompile_code() {
   InitializeAllTargetInfos();
   InitializeAllTargets();
   InitializeAllTargetMCs();
@@ -237,7 +179,7 @@ void recompile_code() {
   InitializeAllAsmPrinters();
 
   //// Run the main "interpreter loop" now.
-  MainLoop();
+  main_loop();
 
   //parse_input();
 

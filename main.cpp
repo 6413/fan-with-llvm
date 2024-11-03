@@ -1,7 +1,8 @@
-#include <pch.h>
-
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/FileSystem.h"
+
+#include <pch.h>
 
 #include <string>
 #include <condition_variable>
@@ -23,7 +24,7 @@ struct pile_t {
   loco_t loco;
 }pile;
 
-void printDebugInfo(llvm::Module& M) {
+void code_t::printDebugInfo(llvm::Module& M) {
   static std::string Str;
   llvm::raw_string_ostream OS(Str);
   M.print(OS, nullptr);
@@ -134,22 +135,24 @@ std::condition_variable g_cv;
 bool ready = false;
 bool processed = false;
 
-void t0() {
+void t0(code_t* code) {
   std::unique_lock lk(g_mutex);
   g_cv.wait(lk, [] { return ready; });
 
-  init_code();
-  recompile_code();
-  run_code();
+  code->init_code();
+  code->recompile_code();
+  code->run_code();
 
   processed = true;
   ready = false;
   lk.unlock();
-  t0();
+  t0(code);
 }
 
 int main() {
-  std::jthread t(t0);
+
+  code_t code;
+  std::jthread t(t0, &code);
   t.detach();
 
   pile.loco.console.commands.add("clear_shapes", [](const fan::commands_t::arg_t& args) {
@@ -164,9 +167,9 @@ int main() {
   pile.loco.input_action.add_keycombo({ fan::key_left_control, fan::key_s }, "save_file");
   pile.loco.input_action.add_keycombo({ fan::key_f5 }, "compile_and_run");
 
-  auto compile_and_run = [&editor] {
-    code_input = editor.GetText();
-    code_input.push_back(EOF);
+  auto compile_and_run = [&editor, &code] {
+    code.code_input = editor.GetText();
+    code.code_input.push_back(EOF);
 
     {
       std::lock_guard lk(g_mutex);
@@ -191,7 +194,7 @@ int main() {
     ImGui::End();
     if (pile.loco.input_action.is_active("save_file")) {
       std::string str = editor.GetText();
-      fan::io::file::write(file_name, str.substr(0, std::max(0ull, str.size() - 1)), std::ios_base::binary);
+      fan::io::file::write(file_name, str.substr(0, std::max(size_t(0), str.size() - 1)), std::ios_base::binary);
     }
 
     needs_frame_skip = false;

@@ -1,11 +1,16 @@
 #pragma once
 
+#include "parser.h"
+
 namespace llvm {
   struct Module;
 }
 
-void init_code();
-void recompile_code();
-int run_code();
+struct code_t : parser_t {
+  void init_code();
+  void recompile_code();
+  void main_loop();
+  int run_code();
 
-void printDebugInfo(llvm::Module& M);
+  void printDebugInfo(llvm::Module& M);
+};

@@ -8,41 +8,40 @@ extern std::unique_ptr<llvm::LLVMContext> TheContext;
 //===----------------------------------------------------------------------===//
 // Abstract Syntax Tree (aka Parse Tree)
 //===----------------------------------------------------------------------===//
-namespace ast {
+struct ast_t : lexer_t {
 
   static llvm::raw_ostream& indent(llvm::raw_ostream& O, int size) {
     return O << std::string(size, ' ');
   }
-
   /// ExprAST - Base class for all expression nodes.
   class ExprAST {
   public:
-    enum ExprKind { 
-      Expr_Binary, 
-      Expr_Call, 
-      Expr_For, 
-      Expr_If, 
-      Expr_Number, 
-      Expr_Unary, 
-      Expr_Variable, 
-      Expr_Var, 
+    enum ExprKind {
+      Expr_Binary,
+      Expr_Call,
+      Expr_For,
+      Expr_If,
+      Expr_Number,
+      Expr_Unary,
+      Expr_Variable,
+      Expr_Var,
       Expr_Compound,
       Expr_String
     };
   private:
-    source_location_t Loc;
+    source_location_t loc;
     ExprKind Kind;
 
   public:
     // lazy implement xd
-    //ExprAST(source_location_t Loc = CurLoc) : Loc(Loc), Kind(Expr_Binary){}
-    ExprAST(ExprKind K, source_location_t Loc = CurLoc) : Loc(Loc), Kind(K) {}
+    //ExprAST(source_location_t loc = CurLoc) : loc(loc), Kind(Expr_Binary){}
+    ExprAST(ExprKind K, source_location_t loc) : loc(loc), Kind(K) {}
 
     virtual ~ExprAST() {}
-    virtual llvm::Value* codegen() = 0;
-    int getLine() const { return Loc.line; }
+    virtual llvm::Value* codegen(ast_t* ast) = 0;
+    int getLine() const { return loc.line; }
     ExprKind getKind() const { return Kind; }
-    int getCol() const { return Loc.col; }
+    int getCol() const { return loc.col; }
     virtual llvm::raw_ostream& dump(llvm::raw_ostream& out, int ind) {
       return out << ':' << getLine() << ':' << getCol() << '\n';
     }
@@ -53,11 +52,11 @@ namespace ast {
     double Val;
 
   public:
-    NumberExprAST(double Val) : ExprAST(Expr_Number), Val(Val) {}
+    NumberExprAST(source_location_t loc, double Val) : ExprAST(Expr_Number, loc), Val(Val) {}
     llvm::raw_ostream& dump(llvm::raw_ostream& out, int ind) override {
       return ExprAST::dump(out << Val, ind);
     }
-    llvm::Value* codegen() override;
+    llvm::Value* codegen(ast_t* ast) override;
   };
 
   /// VariableExprAST - Expression class for referencing a variable, like "a".
@@ -65,10 +64,10 @@ namespace ast {
     std::string Name;
 
   public:
-    VariableExprAST(source_location_t Loc, const std::string& Name)
-      : ExprAST(Expr_Variable, Loc), Name(Name) {}
+    VariableExprAST(source_location_t loc, const std::string& Name)
+      : ExprAST(Expr_Variable, loc), Name(Name) {}
     const std::string& getName() const { return Name; }
-    llvm::Value* codegen() override;
+    llvm::Value* codegen(ast_t* ast) override;
     llvm::raw_ostream& dump(llvm::raw_ostream& out, int ind) override {
       return ExprAST::dump(out << Name, ind);
     }
@@ -80,9 +79,9 @@ namespace ast {
     std::unique_ptr<ExprAST> Operand;
 
   public:
-    UnaryExprAST(char Opcode, std::unique_ptr<ExprAST> Operand)
-      : ExprAST(Expr_Unary), Opcode(Opcode), Operand(std::move(Operand)) {}
-    llvm::Value* codegen() override;
+    UnaryExprAST(source_location_t loc, char Opcode, std::unique_ptr<ExprAST> Operand)
+      : ExprAST(Expr_Unary, loc), Opcode(Opcode), Operand(std::move(Operand)) {}
+    llvm::Value* codegen(ast_t* ast) override;
     llvm::raw_ostream& dump(llvm::raw_ostream& out, int ind) override {
       ExprAST::dump(out << "unary" << Opcode, ind);
       Operand->dump(out, ind + 1);
@@ -96,10 +95,10 @@ namespace ast {
     std::unique_ptr<ExprAST> LHS, RHS;
 
   public:
-    BinaryExprAST(source_location_t Loc, char Op, std::unique_ptr<ExprAST> LHS,
+    BinaryExprAST(source_location_t loc, char Op, std::unique_ptr<ExprAST> LHS,
       std::unique_ptr<ExprAST> RHS)
-      : ExprAST(Expr_Binary, Loc), Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
-    llvm::Value* codegen() override;
+      : ExprAST(Expr_Binary, loc), Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+    llvm::Value* codegen(ast_t* ast) override;
     llvm::raw_ostream& dump(llvm::raw_ostream& out, int ind) override {
       ExprAST::dump(out << "binary" << Op, ind);
       LHS->dump(indent(out, ind) << "LHS:", ind + 1);
@@ -114,10 +113,10 @@ namespace ast {
     std::vector<std::unique_ptr<ExprAST>> Args;
 
   public:
-    CallExprAST(source_location_t Loc, const std::string& Callee,
+    CallExprAST(source_location_t loc, const std::string& Callee,
       std::vector<std::unique_ptr<ExprAST>> Args)
-      : ExprAST(Expr_Call, Loc), Callee(Callee), Args(std::move(Args)) {}
-    llvm::Value* codegen() override;
+      : ExprAST(Expr_Call, loc), Callee(Callee), Args(std::move(Args)) {}
+    llvm::Value* codegen(ast_t* ast) override;
     llvm::raw_ostream& dump(llvm::raw_ostream& out, int ind) override {
       ExprAST::dump(out << "call " << Callee, ind);
       for (const auto& Arg : Args)
@@ -131,11 +130,11 @@ namespace ast {
     std::unique_ptr<ExprAST> Cond, Then, Else;
 
   public:
-    IfExprAST(source_location_t Loc, std::unique_ptr<ExprAST> Cond,
+    IfExprAST(source_location_t loc, std::unique_ptr<ExprAST> Cond,
       std::unique_ptr<ExprAST> Then, std::unique_ptr<ExprAST> Else)
-      : ExprAST(Expr_If, Loc), Cond(std::move(Cond)), Then(std::move(Then)),
+      : ExprAST(Expr_If, loc), Cond(std::move(Cond)), Then(std::move(Then)),
       Else(std::move(Else)) {}
-    llvm::Value* codegen() override;
+    llvm::Value* codegen(ast_t* ast) override;
     llvm::raw_ostream& dump(llvm::raw_ostream& out, int ind) override {
       ExprAST::dump(out << "if", ind);
       Cond->dump(indent(out, ind) << "Cond:", ind + 1);
@@ -149,20 +148,20 @@ namespace ast {
     std::vector<std::unique_ptr<ExprAST>> Expressions;
 
   public:
-    CompoundExprAST(std::vector<std::unique_ptr<ExprAST>> Expressions)
-      : ExprAST(Expr_Compound), Expressions(std::move(Expressions)) {}
+    CompoundExprAST(source_location_t loc, std::vector<std::unique_ptr<ExprAST>> Expressions)
+      : ExprAST(Expr_Compound, loc), Expressions(std::move(Expressions)) {}
 
     std::vector<std::unique_ptr<ExprAST>>& getStatements() { return Expressions; }
 
-    llvm::Value* codegen() override {
+    llvm::Value* codegen(ast_t* ast) override {
       for (auto& Expr : Expressions) {
-        if (!Expr->codegen())
+        if (!Expr->codegen(ast))
           return nullptr;
       }
-      
+
       return llvm::Constant::getNullValue(llvm::Type::getDoubleTy(*TheContext));
     }
-    static bool classof(const ExprAST* E ) { 
+    static bool classof(const ExprAST* E) {
       auto x = E->getKind();
       return E->getKind() == Expr_Compound;
     }
@@ -175,12 +174,12 @@ namespace ast {
     std::unique_ptr<ExprAST> Start, End, Step, Body;
 
   public:
-    ForExprAST(const std::string& VarName, std::unique_ptr<ExprAST> Start,
+    ForExprAST(source_location_t loc, const std::string& VarName, std::unique_ptr<ExprAST> Start,
       std::unique_ptr<ExprAST> End, std::unique_ptr<ExprAST> Step,
       std::unique_ptr<ExprAST> Body)
-      : ExprAST(Expr_For), VarName(VarName), Start(std::move(Start)), End(std::move(End)),
+      : ExprAST(Expr_For, loc), VarName(VarName), Start(std::move(Start)), End(std::move(End)),
       Step(std::move(Step)), Body(std::move(Body)) {}
-    llvm::Value* codegen() override;
+    llvm::Value* codegen(ast_t* ast) override;
     llvm::raw_ostream& dump(llvm::raw_ostream& out, int ind) override {
       ExprAST::dump(out << "for", ind);
       Start->dump(indent(out, ind) << "Cond:", ind + 1);
@@ -198,10 +197,11 @@ namespace ast {
 
   public:
     VarExprAST(
+      source_location_t loc,
       std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> VarNames,
       std::unique_ptr<ExprAST> Body)
-      : ExprAST(Expr_Var), VarNames(std::move(VarNames)), Body(std::move(Body)) {}
-    llvm::Value* codegen() override;
+      : ExprAST(Expr_Var, loc), VarNames(std::move(VarNames)), Body(std::move(Body)) {}
+    llvm::Value* codegen(ast_t* ast) override;
     llvm::raw_ostream& dump(llvm::raw_ostream& out, int ind) override {
       ExprAST::dump(out << "var", ind);
       for (const auto& NamedVar : VarNames)
@@ -223,13 +223,13 @@ namespace ast {
     int Line;
 
   public:
-    PrototypeAST(source_location_t Loc, const std::string& Name,
+    PrototypeAST(source_location_t loc, const std::string& Name,
       std::vector<std::string> Args, std::vector<std::string> ArgTypes,
       bool IsOperator = false, unsigned Prec = 0)
       : Name(Name), Args(std::move(Args)), ArgTypes(std::move(ArgTypes)),
-      IsOperator(IsOperator), Precedence(Prec), Line(Loc.line) {}
+      IsOperator(IsOperator), Precedence(Prec), Line(loc.line) {}
 
-    llvm::Function* codegen();
+    llvm::Function* codegen(ast_t* ast);
     const std::string& getName() const { return Name; }
 
     bool isUnaryOp() const { return IsOperator && Args.size() == 1; }
@@ -254,7 +254,7 @@ namespace ast {
     FunctionAST(std::unique_ptr<PrototypeAST> Proto,
       std::unique_ptr<ExprAST> Body)
       : Proto(std::move(Proto)), Body(std::move(Body)) {}
-    llvm::Function* codegen();
+    llvm::Function* codegen(ast_t* ast);
     llvm::raw_ostream& dump(llvm::raw_ostream& out, int ind) {
       indent(out, ind) << "FunctionAST\n";
       ++ind;
@@ -269,9 +269,39 @@ namespace ast {
     std::string Val;
 
   public:
-    StringExprAST(const std::string& Val) : ExprAST(Expr_String), Val(Val) {}
-    llvm::Value* codegen() override {
+    StringExprAST(source_location_t loc, const std::string& Val) : ExprAST(Expr_String, loc), Val(Val) {}
+    llvm::Value* codegen(ast_t* ast) override {
       return ir_builder->CreateGlobalStringPtr(Val, "str");
     }
   };
-} // end anonymous namespace
+
+  /// LogError* - These are little helper functions for error handling.
+  std::unique_ptr<ExprAST> LogError(const char* Str) {
+    fprintf(stderr, "Error: %s %d %d\n", Str, cursor_location.line, cursor_location.col);
+    return nullptr;
+  }
+
+  llvm::Value* LogErrorV(const char* Str) {
+    LogError(Str);
+    return nullptr;
+  }
+
+  std::unique_ptr<PrototypeAST> LogErrorP(const char* Str) {
+    LogError(Str);
+    return nullptr;
+  }
+
+  /// BinopPrecedence - This holds the precedence for each binary operator that is
+/// defined.
+  std::map<char, int> BinopPrecedence{
+    {'=', 2},
+    {'<', 10},
+    {'>', 10},
+    {'+', 20},
+    {'-', 20},
+    {'*', 40},
+    {'/', 40},
+    { '%', 40 },
+  };
+  std::map<std::string, std::unique_ptr<ast_t::PrototypeAST>> FunctionProtos;
+};

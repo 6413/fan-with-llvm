@@ -1,33 +1,30 @@
-#include <pch.h>
 #include "codegen.h"
 
 #include "../include/KaleidoscopeJIT.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/Analysis/BasicAliasAnalysis.h"
-#include "llvm/Analysis/Passes.h"
-#include "llvm/IR/DIBuilder.h"
-#include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/LegacyPassManager.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IR/Verifier.h"
-#include "llvm/Support/TargetSelect.h"
-#include "llvm/TargetParser/Host.h"
-#include "llvm/Transforms/Scalar.h"
-#include "llvm/ExecutionEngine/MCJIT.h"
-#include "llvm/ExecutionEngine/Interpreter.h"
-#include "llvm/ExecutionEngine/GenericValue.h"
+#include <llvm/ADT/STLExtras.h>
+#include <llvm/Analysis/BasicAliasAnalysis.h>
+#include <llvm/Analysis/Passes.h>
+#include <llvm/IR/DIBuilder.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/LegacyPassManager.h>
+#include <llvm/IR/Module.h>
+#include <llvm/IR/Verifier.h>
+#include <llvm/Support/TargetSelect.h>
+#include <llvm/TargetParser/Host.h>
+#include <llvm/Transforms/Scalar.h>
+#include <llvm/ExecutionEngine/MCJIT.h>
+#include <llvm/ExecutionEngine/Interpreter.h>
+#include <llvm/ExecutionEngine/GenericValue.h>
 
 #include "parser.h"
 
 using namespace llvm;
 using namespace llvm::orc;
-using namespace ast;
 
 ExitOnError ExitOnErr;
 std::map<std::string, AllocaInst*> NamedValues;
 std::unique_ptr<KaleidoscopeJIT> TheJIT;
-std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
 
 std::unique_ptr<LLVMContext> TheContext;
 std::unique_ptr<Module> TheModule;
@@ -43,11 +40,11 @@ debug_info_t KSDbgInfo;
 //===----------------------------------------------------------------------===//
 
 DIType* debug_info_t::getDoubleTy() {
-  if (DblTy)
-    return DblTy;
+  if (di_type)
+    return di_type;
 
-  DblTy = DBuilder->createBasicType("double", 64, dwarf::DW_ATE_float);
-  return DblTy;
+  di_type = DBuilder->createBasicType("double", 64, dwarf::DW_ATE_float);
+  return di_type;
 }
 
 static DISubroutineType* CreateFunctionType(unsigned NumArgs) {
@@ -75,7 +72,6 @@ void codegen_init() {
   ExitOnErr = ExitOnError{};
   NamedValues = std::map<std::string, AllocaInst*>{};
   TheJIT = std::unique_ptr<KaleidoscopeJIT>{};
-  FunctionProtos = std::map<std::string, std::unique_ptr<PrototypeAST>>{};
 }
 
 void create_the_JIT() {
@@ -84,10 +80,6 @@ void create_the_JIT() {
 
 std::unique_ptr<KaleidoscopeJIT>& get_JIT() {
   return TheJIT;
-}
-
-std::map<std::string, std::unique_ptr<PrototypeAST>>& get_function_protos() {
-  return FunctionProtos;
 }
 
 void init_module() {
@@ -99,21 +91,16 @@ void init_module() {
   ir_builder = std::make_unique<IRBuilder<>>(*TheContext);
 }
 
-Value* LogErrorV(const char* Str) {
-  LogError(Str);
-  return nullptr;
-}
-
-Function* getFunction(std::string Name) {
+Function* getFunction(ast_t* ast, std::string Name) {
   // First, see if the function has already been added to the current module.
   if (auto* F = TheModule->getFunction(Name))
     return F;
 
   // If not, check whether we can codegen the declaration from some existing
   // prototype.
-  auto FI = FunctionProtos.find(Name);
-  if (FI != FunctionProtos.end())
-    return FI->second->codegen();
+  auto FI = ast->FunctionProtos.find(Name);
+  if (FI != ast->FunctionProtos.end())
+    return FI->second->codegen(ast);
 
   // If no existing prototype exists, return null.
   return nullptr;
@@ -128,16 +115,16 @@ static AllocaInst* CreateEntryBlockAlloca(Function* TheFunction,
   return TmpB.CreateAlloca(Type::getDoubleTy(*TheContext), nullptr, VarName);
 }
 
-Value* NumberExprAST::codegen() {
+Value* ast_t::NumberExprAST::codegen(ast_t* ast) {
   KSDbgInfo.emit_location(this);
   return ConstantFP::get(*TheContext, APFloat(Val));
 }
 
-Value* VariableExprAST::codegen() {
+Value* ast_t::VariableExprAST::codegen(ast_t* ast) {
   // Look this variable up in the function.
   Value* V = NamedValues[Name];
   if (!V)
-    return LogErrorV("Unknown variable name");
+    return ast->LogErrorV("Unknown variable name");
 
   KSDbgInfo.emit_location(this);
   // Load the value.
@@ -145,20 +132,20 @@ Value* VariableExprAST::codegen() {
   return ir_builder->CreateLoad(Type::getDoubleTy(*TheContext), V, Name.c_str());
 }
 
-Value* UnaryExprAST::codegen() {
-  Value* OperandV = Operand->codegen();
+Value* ast_t::UnaryExprAST::codegen(ast_t* ast) {
+  Value* OperandV = Operand->codegen(ast);
   if (!OperandV)
     return nullptr;
 
-  Function* F = getFunction(std::string("unary") + Opcode);
+  Function* F = getFunction(ast, std::string("unary") + Opcode);
   if (!F)
-    return LogErrorV("Unknown unary operator");
+    return ast->LogErrorV("Unknown unary operator");
 
   KSDbgInfo.emit_location(this);
   return ir_builder->CreateCall(F, OperandV, "unop");
 }
 
-Value* BinaryExprAST::codegen() {
+Value* ast_t::BinaryExprAST::codegen(ast_t* ast) {
   KSDbgInfo.emit_location(this);
 
   // Special case '=' because we don't want to emit the LHS as an expression.
@@ -169,23 +156,23 @@ Value* BinaryExprAST::codegen() {
     // dynamic_cast for automatic error checking.
     VariableExprAST* LHSE = static_cast<VariableExprAST*>(LHS.get());
     if (!LHSE)
-      return LogErrorV("destination of '=' must be a variable");
+      return ast->LogErrorV("destination of '=' must be a variable");
     // Codegen the RHS.
-    Value* Val = RHS->codegen();
+    Value* Val = RHS->codegen(ast);
     if (!Val)
       return nullptr;
 
     // Look up the name.
     Value* Variable = NamedValues[LHSE->getName()];
     if (!Variable)
-      return LogErrorV("Unknown variable name");
+      return ast->LogErrorV("Unknown variable name");
 
     ir_builder->CreateStore(Val, Variable);
     return Val;
   }
 
-  Value* L = LHS->codegen();
-  Value* R = RHS->codegen();
+  Value* L = LHS->codegen(ast);
+  Value* R = RHS->codegen(ast);
   if (!L || !R)
     return nullptr;
 
@@ -216,7 +203,7 @@ Value* BinaryExprAST::codegen() {
       return ir_builder->CreateFSub(L, Mult, "modtmp");
     }
     else {
-      return LogErrorV("Operands to % must be both integers or both floats.");
+      return ast->LogErrorV("Operands to % must be both integers or both floats.");
     }
   }
   default:
@@ -225,28 +212,28 @@ Value* BinaryExprAST::codegen() {
 
   // If it wasn't a builtin binary operator, it must be a user defined one. Emit
   // a call to it.
-  Function* F = getFunction(std::string("binary") + Op);
+  Function* F = getFunction(ast, std::string("binary") + Op);
   assert(F && "binary operator not found!");
 
   Value* Ops[] = { L, R };
   return ir_builder->CreateCall(F, Ops, "binop");
 }
 
-Value* CallExprAST::codegen() {
+Value* ast_t::CallExprAST::codegen(ast_t* ast) {
   KSDbgInfo.emit_location(this);
 
   // Look up the name in the global module table.
-  Function* CalleeF = getFunction(Callee);
+  Function* CalleeF = getFunction(ast, Callee);
   if (!CalleeF)
-    return LogErrorV("Unknown function referenced");
+    return ast->LogErrorV("Unknown function referenced");
 
   // If argument mismatch error.
   if (CalleeF->arg_size() != Args.size())
-    return LogErrorV("Incorrect # arguments passed");
+    return ast->LogErrorV("Incorrect # arguments passed");
 
   std::vector<Value*> ArgsV;
   for (unsigned i = 0, e = Args.size(); i != e; ++i) {
-    ArgsV.push_back(Args[i]->codegen());
+    ArgsV.push_back(Args[i]->codegen(ast));
     if (!ArgsV.back())
       return nullptr;
   }
@@ -254,10 +241,10 @@ Value* CallExprAST::codegen() {
   return ir_builder->CreateCall(CalleeF, ArgsV, "calltmp");
 }
 
-Value* IfExprAST::codegen() {
+Value* ast_t::IfExprAST::codegen(ast_t* ast) {
   KSDbgInfo.emit_location(this);
 
-  Value* CondV = Cond->codegen();
+  Value* CondV = Cond->codegen(ast);
   if (!CondV)
     return nullptr;
 
@@ -278,7 +265,7 @@ Value* IfExprAST::codegen() {
   // Emit then value.
   ir_builder->SetInsertPoint(ThenBB);
 
-  Value* ThenV = Then->codegen();
+  Value* ThenV = Then->codegen(ast);
   if (!ThenV)
     return nullptr;
 
@@ -290,7 +277,7 @@ Value* IfExprAST::codegen() {
   TheFunction->insert(TheFunction->end(), ElseBB);
   ir_builder->SetInsertPoint(ElseBB);
 
-  Value* ElseV = Else->codegen();
+  Value* ElseV = Else->codegen(ast);
   if (!ElseV)
     return nullptr;
 
@@ -327,13 +314,13 @@ Value* IfExprAST::codegen() {
 //   store nextvar -> var
 //   br endcond, loop, endloop
 // outloop:
-Value* ForExprAST::codegen() {
+Value* ast_t::ForExprAST::codegen(ast_t* ast) {
   Function* TheFunction = ir_builder->GetInsertBlock()->getParent();
   // Create an alloca for the variable in the entry block.
   AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, VarName);
   KSDbgInfo.emit_location(this);
   // Emit the start code first, without 'variable' in scope.
-  Value* StartVal = Start->codegen();
+  Value* StartVal = Start->codegen(ast);
   if (!StartVal)
     return nullptr;
   // Store the value into the alloca.
@@ -351,12 +338,12 @@ Value* ForExprAST::codegen() {
   // Generate code for the loop body
   if (auto* C = llvm::dyn_cast<CompoundExprAST>(Body.get())) {
     for (auto& Stmt : C->getStatements()) {
-      if (!Stmt->codegen())
+      if (!Stmt->codegen(ast))
         return nullptr;
     }
   }
   else {
-    if (!Body->codegen())
+    if (!Body->codegen(ast))
       return nullptr;
   }
 
@@ -370,7 +357,7 @@ Value* ForExprAST::codegen() {
   // Emit the step value.
   Value* StepVal = nullptr;
   if (Step) {
-    StepVal = Step->codegen();
+    StepVal = Step->codegen(ast);
     if (!StepVal)
       return nullptr;
   }
@@ -379,7 +366,7 @@ Value* ForExprAST::codegen() {
     StepVal = ConstantFP::get(*TheContext, APFloat(1.0));
   }
   // Compute the end condition.
-  Value* EndCond = End->codegen();
+  Value* EndCond = End->codegen(ast);
   if (!EndCond)
     return nullptr;
   // Reload, increment, and restore the alloca.
@@ -403,7 +390,7 @@ Value* ForExprAST::codegen() {
   return Constant::getNullValue(Type::getDoubleTy(*TheContext));
 }
 
-Value* VarExprAST::codegen() {
+Value* ast_t::VarExprAST::codegen(ast_t* ast) {
   std::vector<AllocaInst*> OldBindings;
 
   Function* TheFunction = ir_builder->GetInsertBlock()->getParent();
@@ -420,7 +407,7 @@ Value* VarExprAST::codegen() {
     //    var a = a in ...   # refers to outer 'a'.
     Value* InitVal;
     if (Init) {
-      InitVal = Init->codegen();
+      InitVal = Init->codegen(ast);
       if (!InitVal)
         return nullptr;
     }
@@ -442,7 +429,7 @@ Value* VarExprAST::codegen() {
   KSDbgInfo.emit_location(this);
 
   // Codegen the body, now that all vars are in scope.
-  Value* BodyVal = Body->codegen();
+  Value* BodyVal = Body->codegen(ast);
   if (!BodyVal)
     return nullptr;
 
@@ -454,7 +441,7 @@ Value* VarExprAST::codegen() {
   return BodyVal;
 }
 
-Function* PrototypeAST::codegen() {
+Function* ast_t::PrototypeAST::codegen(ast_t* ast) {
   // Create a vector to hold the argument types
   std::vector<Type*> ArgTypesLLVM;
 
@@ -467,7 +454,7 @@ Function* PrototypeAST::codegen() {
       ArgTypesLLVM.push_back(PointerType::getUnqual(Type::getInt8Ty(*TheContext)));
     }
     else {
-      LogError("Unknown argument type");
+      ast->LogError("Unknown argument type");
       return nullptr;
     }
   }
@@ -487,10 +474,10 @@ Function* PrototypeAST::codegen() {
   return F;
 }
 
-Function* FunctionAST::codegen() {
+Function* ast_t::FunctionAST::codegen(ast_t* ast) {
   auto& P = *Proto;
-  FunctionProtos[Proto->getName()] = std::move(Proto);
-  Function* TheFunction = getFunction(P.getName());
+  ast->FunctionProtos[Proto->getName()] = std::move(Proto);
+  Function* TheFunction = getFunction(ast, P.getName());
   if (!TheFunction)
     return nullptr;
 
@@ -499,15 +486,15 @@ Function* FunctionAST::codegen() {
   ir_builder->SetInsertPoint(BB);
 
   // Debug info setup
-  DIFile* Unit = DBuilder->createFile(KSDbgInfo.TheCU->getFilename(),
-    KSDbgInfo.TheCU->getDirectory());
+  DIFile* Unit = DBuilder->createFile(KSDbgInfo.di_compile_unit->getFilename(),
+    KSDbgInfo.di_compile_unit->getDirectory());
   DIScope* FContext = Unit;
   unsigned LineNo = P.getLine();
   unsigned ScopeLine = LineNo;
   DISubprogram* SP = DBuilder->createFunction(FContext, P.getName(), StringRef(), Unit, LineNo, CreateFunctionType(TheFunction->arg_size()), ScopeLine, DINode::FlagPrototyped, DISubprogram::SPFlagDefinition);
   TheFunction->setSubprogram(SP);
 
-  KSDbgInfo.LexicalBlocks.push_back(SP);
+  KSDbgInfo.lexical_blocks.push_back(SP);
   KSDbgInfo.emit_location(nullptr);
 
   // Record the function arguments in the NamedValues map
@@ -524,19 +511,19 @@ Function* FunctionAST::codegen() {
   KSDbgInfo.emit_location(Body.get());
 
   // Generate code for the body
-  Value* RetVal = Body->codegen();
+  Value* RetVal = Body->codegen(ast);
   if (!RetVal) {
     TheFunction->eraseFromParent();
     if (P.isBinaryOp())
-      BinopPrecedence.erase(Proto->getOperatorName());
-    KSDbgInfo.LexicalBlocks.pop_back();
+      ast->BinopPrecedence.erase(Proto->getOperatorName());
+    KSDbgInfo.lexical_blocks.pop_back();
     return nullptr;
   }
 
   // Create return instruction
   ir_builder->CreateRet(RetVal);
 
-  KSDbgInfo.LexicalBlocks.pop_back();
+  KSDbgInfo.lexical_blocks.pop_back();
 
   verifyFunction(*TheFunction);
 
