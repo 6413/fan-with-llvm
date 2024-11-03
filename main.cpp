@@ -1,18 +1,15 @@
 #include <pch.h>
 
-// TEMP
-
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/Module.h"
 
 #include <string>
 #include <condition_variable>
-//
+
 extern std::unique_ptr<llvm::LLVMContext> TheContext;
 extern std::unique_ptr<llvm::Module> TheModule;
 extern std::unique_ptr<llvm::DIBuilder> DBuilder;
 
-///////////////
 #include "llvm-ir/lexer.h"
 #include "llvm-ir/ast.h"
 #include "llvm-ir/parser.h"
@@ -152,7 +149,6 @@ void t0() {
 }
 
 int main() {
-  //
   std::jthread t(t0);
   t.detach();
 
