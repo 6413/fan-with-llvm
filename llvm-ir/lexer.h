@@ -4,10 +4,7 @@
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/IRBuilder.h"
 
-using namespace llvm;
-
-extern std::unique_ptr<IRBuilder<>> Builder;
-extern std::unique_ptr<DIBuilder> DBuilder;
+extern std::unique_ptr<llvm::IRBuilder<>> ir_builder;
 
 //===----------------------------------------------------------------------===//
 // Lexer
@@ -44,66 +41,33 @@ enum Token {
   tok_type_double = -16,
 };
 
-static std::string getTokName(int Tok) {
-  switch (Tok) {
-  case tok_eof:
-    return "eof";
-  case tok_def:
-    return "def";
-  case tok_extern:
-    return "extern";
-  case tok_identifier:
-    return "identifier";
-  case tok_number:
-    return "number";
-  case tok_if:
-    return "if";
-  case tok_then:
-    return "then";
-  case tok_else:
-    return "else";
-  case tok_for:
-    return "for";
-  case tok_in:
-    return "in";
-  case tok_binary:
-    return "binary";
-  case tok_unary:
-    return "unary";
-  case tok_var:
-    return "var";
-  }
-  return std::string(1, (char)Tok);
-}
-
-
-struct DebugInfo {
-  DICompileUnit* TheCU;
-  DIType* DblTy;
-  std::vector<DIScope*> LexicalBlocks;
+struct debug_info_t {
+  llvm::DICompileUnit* TheCU;
+  llvm::DIType* DblTy;
+  std::vector<llvm::DIScope*> LexicalBlocks;
 
   void emitLocation(auto AST) {
     if constexpr (std::is_null_pointer_v<decltype(AST)>)
-      return Builder->SetCurrentDebugLocation(DebugLoc());
+      return ir_builder->SetCurrentDebugLocation(llvm::DebugLoc());
     else {
-      DIScope* Scope;
+      llvm::DIScope* Scope;
       if (LexicalBlocks.empty())
         Scope = TheCU;
       else
         Scope = LexicalBlocks.back();
-      Builder->SetCurrentDebugLocation(DILocation::get(
+      ir_builder->SetCurrentDebugLocation(llvm::DILocation::get(
         Scope->getContext(), AST->getLine(), AST->getCol(), Scope));
     }
   }
-  DIType* getDoubleTy();
+  llvm::DIType* getDoubleTy();
 };
 
 struct SourceLocation {
   int Line;
   int Col;
 };
-inline  SourceLocation CurLoc;
-inline  SourceLocation LexLoc = { 1, 0 };
+inline SourceLocation CurLoc;
+inline SourceLocation LexLoc = { 1, 0 };
 
 inline std::string code_input = "";
 
@@ -111,7 +75,6 @@ inline int index = 0;
 
 static int advance() {
   int LastChar = code_input.operator[](index);
-  //fan::print("processing", LastChar);
   ++index;
   if (index >= code_input.size()) {
     index = 0;
@@ -127,8 +90,8 @@ static int advance() {
   return LastChar;
 }
 
-inline static std::string IdentifierStr; // Filled in if tok_identifier
-inline static double NumVal;             // Filled in if tok_number
+inline static std::string IdentifierStr;
+inline static double NumVal;
 inline static std::string StringVal;
 
 static int gLastChar = ' ';
@@ -167,9 +130,9 @@ static int gettok() {
     if (IdentifierStr == "var")
       return tok_var;
     if (IdentifierStr == "string")
-      return tok_type_string;  // Handle 'string' as a keyword for type
+      return tok_type_string;
     if (IdentifierStr == "double")
-      return tok_type_double;  // Handle 'double' as a keyword for type
+      return tok_type_double;
     return tok_identifier;
   }
 
@@ -212,7 +175,6 @@ static int gettok() {
   if (gLastChar == EOF)
     return tok_eof;
 
-  // Otherwise, just return the character as its ascii value.
   int ThisChar = gLastChar;
   gLastChar = advance();
   return ThisChar;

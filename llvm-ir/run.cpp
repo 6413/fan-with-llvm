@@ -18,8 +18,9 @@
 
 using namespace llvm;
 
-extern DebugInfo KSDbgInfo;
+extern debug_info_t KSDbgInfo;
 extern std::unique_ptr<llvm::Module> TheModule;
+extern std::unique_ptr<DIBuilder> DBuilder;
 
 void init_code() {
   InitializeNativeTarget();
