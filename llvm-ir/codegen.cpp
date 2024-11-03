@@ -129,7 +129,7 @@ static AllocaInst* CreateEntryBlockAlloca(Function* TheFunction,
 }
 
 Value* NumberExprAST::codegen() {
-  KSDbgInfo.emitLocation(this);
+  KSDbgInfo.emit_location(this);
   return ConstantFP::get(*TheContext, APFloat(Val));
 }
 
@@ -139,7 +139,7 @@ Value* VariableExprAST::codegen() {
   if (!V)
     return LogErrorV("Unknown variable name");
 
-  KSDbgInfo.emitLocation(this);
+  KSDbgInfo.emit_location(this);
   // Load the value.
   // PointerType::getUnqual(i8*)
   return ir_builder->CreateLoad(Type::getDoubleTy(*TheContext), V, Name.c_str());
@@ -154,12 +154,12 @@ Value* UnaryExprAST::codegen() {
   if (!F)
     return LogErrorV("Unknown unary operator");
 
-  KSDbgInfo.emitLocation(this);
+  KSDbgInfo.emit_location(this);
   return ir_builder->CreateCall(F, OperandV, "unop");
 }
 
 Value* BinaryExprAST::codegen() {
-  KSDbgInfo.emitLocation(this);
+  KSDbgInfo.emit_location(this);
 
   // Special case '=' because we don't want to emit the LHS as an expression.
   if (Op == '=') {
@@ -233,7 +233,7 @@ Value* BinaryExprAST::codegen() {
 }
 
 Value* CallExprAST::codegen() {
-  KSDbgInfo.emitLocation(this);
+  KSDbgInfo.emit_location(this);
 
   // Look up the name in the global module table.
   Function* CalleeF = getFunction(Callee);
@@ -255,7 +255,7 @@ Value* CallExprAST::codegen() {
 }
 
 Value* IfExprAST::codegen() {
-  KSDbgInfo.emitLocation(this);
+  KSDbgInfo.emit_location(this);
 
   Value* CondV = Cond->codegen();
   if (!CondV)
@@ -331,7 +331,7 @@ Value* ForExprAST::codegen() {
   Function* TheFunction = ir_builder->GetInsertBlock()->getParent();
   // Create an alloca for the variable in the entry block.
   AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, VarName);
-  KSDbgInfo.emitLocation(this);
+  KSDbgInfo.emit_location(this);
   // Emit the start code first, without 'variable' in scope.
   Value* StartVal = Start->codegen();
   if (!StartVal)
@@ -439,7 +439,7 @@ Value* VarExprAST::codegen() {
     NamedValues[VarName] = Alloca;
   }
 
-  KSDbgInfo.emitLocation(this);
+  KSDbgInfo.emit_location(this);
 
   // Codegen the body, now that all vars are in scope.
   Value* BodyVal = Body->codegen();
@@ -508,7 +508,7 @@ Function* FunctionAST::codegen() {
   TheFunction->setSubprogram(SP);
 
   KSDbgInfo.LexicalBlocks.push_back(SP);
-  KSDbgInfo.emitLocation(nullptr);
+  KSDbgInfo.emit_location(nullptr);
 
   // Record the function arguments in the NamedValues map
   NamedValues.clear();
@@ -521,7 +521,7 @@ Function* FunctionAST::codegen() {
     NamedValues[std::string(Arg.getName())] = Alloca;
   }
 
-  KSDbgInfo.emitLocation(Body.get());
+  KSDbgInfo.emit_location(Body.get());
 
   // Generate code for the body
   Value* RetVal = Body->codegen();

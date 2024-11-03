@@ -36,14 +36,14 @@ void init_code() {
 
   codegen_init();
 
-  IdentifierStr = std::string(); // Filled in if tok_identifier
-  NumVal = double();             // Filled in if tok_number
+  identifier_string = std::string(); // Filled in if tok_identifier
+  double_value = double();             // Filled in if tok_number
 
   CurTok = 0;
-  gLastChar = ' ';
+  g_last_char = ' ';
 
-  CurLoc = SourceLocation();
-  LexLoc = SourceLocation{ 1, 0 };
+  CurLoc = source_location_t();
+  LexLoc = source_location_t{ 1, 0 };
 
   // Prime the first token.
   getNextToken();
@@ -215,7 +215,7 @@ void MainLoop() {
     case ';': // ignore top-level semicolons.
       getNextToken();
       break;
-    case tok_def:
+    case tok_definition:
       HandleDefinition();
       break;
     case tok_extern:

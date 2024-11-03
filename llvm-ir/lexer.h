@@ -10,35 +10,33 @@ extern std::unique_ptr<llvm::IRBuilder<>> ir_builder;
 // Lexer
 //===----------------------------------------------------------------------===//
 
-// The lexer returns tokens [0-255] if it is an unknown character, otherwise one
-// of these for known things.
-enum Token {
-  tok_eof = -1,
 
-  // commands
-  tok_def = -2,
-  tok_extern = -3,
+enum token_e {
+  // Token types
+  tok_eof = 256,
+  tok_definition,
+  tok_extern,
 
-  // primary
-  tok_identifier = -4,
-  tok_number = -5,
+  // Primary tokens
+  tok_identifier,
+  tok_number,
 
-  // control
-  tok_if = -6,
-  tok_then = -7,
-  tok_else = -8,
-  tok_for = -9,
-  tok_in = -10,
+  // Control flow tokens
+  tok_if,
+  tok_then,
+  tok_else,
+  tok_for,
+  tok_in,
 
-  // operators
-  tok_binary = -11,
-  tok_unary = -12,
+  // Operator tokens
+  tok_binary_operator,
+  tok_unary_operator,
 
-  // var definition
-  tok_var = -13,
-  tok_string = -14,
-  tok_type_string = -15,
-  tok_type_double = -16,
+  // Variable definition tokens
+  tok_variable,
+  tok_literal_string,
+  tok_type_string,
+  tok_type_double,
 };
 
 struct debug_info_t {
@@ -46,7 +44,7 @@ struct debug_info_t {
   llvm::DIType* DblTy;
   std::vector<llvm::DIScope*> LexicalBlocks;
 
-  void emitLocation(auto AST) {
+  void emit_location(auto AST) {
     if constexpr (std::is_null_pointer_v<decltype(AST)>)
       return ir_builder->SetCurrentDebugLocation(llvm::DebugLoc());
     else {
@@ -62,120 +60,120 @@ struct debug_info_t {
   llvm::DIType* getDoubleTy();
 };
 
-struct SourceLocation {
-  int Line;
-  int Col;
+struct source_location_t {
+  int line;
+  int col;
 };
-inline SourceLocation CurLoc;
-inline SourceLocation LexLoc = { 1, 0 };
+inline source_location_t CurLoc;
+inline source_location_t LexLoc = { 1, 0 };
 
 inline std::string code_input = "";
 
 inline int index = 0;
 
 static int advance() {
-  int LastChar = code_input.operator[](index);
+  int last_char = code_input.operator[](index);
   ++index;
   if (index >= code_input.size()) {
     index = 0;
     code_input.clear();
   }
 
-  if (LastChar == '\n' || LastChar == '\r') {
-    LexLoc.Line++;
-    LexLoc.Col = 0;
+  if (last_char == '\n' || last_char == '\r') {
+    LexLoc.line++;
+    LexLoc.col = 0;
   }
   else
-    LexLoc.Col++;
-  return LastChar;
+    LexLoc.col++;
+  return last_char;
 }
 
-inline static std::string IdentifierStr;
-inline static double NumVal;
-inline static std::string StringVal;
+inline static std::string identifier_string;
+inline static double double_value;
+inline static std::string string_value;
 
-static int gLastChar = ' ';
+static int g_last_char = ' ';
 /// gettok - Return the next token from standard input.
 static int gettok() {
   // Skip any whitespace.
-  while (isspace(gLastChar))
-    gLastChar = advance();
+  while (isspace(g_last_char))
+    g_last_char = advance();
 
   CurLoc = LexLoc;
 
   // Identifier: [a-zA-Z_][a-zA-Z0-9_]*
-  if (isalpha(gLastChar) || gLastChar == '_') {
-    IdentifierStr = gLastChar;
-    while (isalnum(gLastChar = advance()) || gLastChar == '_')
-      IdentifierStr += gLastChar;
+  if (isalpha(g_last_char) || g_last_char == '_') {
+    identifier_string = g_last_char;
+    while (isalnum(g_last_char = advance()) || g_last_char == '_')
+      identifier_string += g_last_char;
 
-    if (IdentifierStr == "def")
-      return tok_def;
-    if (IdentifierStr == "extern")
+    if (identifier_string == "def")
+      return tok_definition;
+    if (identifier_string == "extern")
       return tok_extern;
-    if (IdentifierStr == "if")
+    if (identifier_string == "if")
       return tok_if;
-    if (IdentifierStr == "then")
+    if (identifier_string == "then")
       return tok_then;
-    if (IdentifierStr == "else")
+    if (identifier_string == "else")
       return tok_else;
-    if (IdentifierStr == "for")
+    if (identifier_string == "for")
       return tok_for;
-    if (IdentifierStr == "in")
+    if (identifier_string == "in")
       return tok_in;
-    if (IdentifierStr == "binary")
-      return tok_binary;
-    if (IdentifierStr == "unary")
-      return tok_unary;
-    if (IdentifierStr == "var")
-      return tok_var;
-    if (IdentifierStr == "string")
+    if (identifier_string == "binary")
+      return tok_binary_operator;
+    if (identifier_string == "unary")
+      return tok_unary_operator;
+    if (identifier_string == "var")
+      return tok_variable;
+    if (identifier_string == "string")
       return tok_type_string;
-    if (IdentifierStr == "double")
+    if (identifier_string == "double")
       return tok_type_double;
     return tok_identifier;
   }
 
   // Number: [0-9.]+
-  if (isdigit(gLastChar) || gLastChar == '.') {
-    std::string NumStr;
+  if (isdigit(g_last_char) || g_last_char == '.') {
+    std::string num_str;
     do {
-      NumStr += gLastChar;
-      gLastChar = advance();
-    } while (isdigit(gLastChar) || gLastChar == '.');
+      num_str += g_last_char;
+      g_last_char = advance();
+    } while (isdigit(g_last_char) || g_last_char == '.');
 
-    NumVal = strtod(NumStr.c_str(), nullptr);
+    double_value = strtod(num_str.c_str(), nullptr);
     return tok_number;
   }
 
   // String literal: "..."
-  if (gLastChar == '"') {
-    std::string Str;
-    while ((gLastChar = advance()) != '"' && gLastChar != EOF)
-      Str += gLastChar;
+  if (g_last_char == '"') {
+    std::string str;
+    while ((g_last_char = advance()) != '"' && g_last_char != EOF)
+      str += g_last_char;
 
-    if (gLastChar == '"')
-      gLastChar = advance();
+    if (g_last_char == '"')
+      g_last_char = advance();
 
-    StringVal = Str;
-    return tok_string;
+    string_value = str;
+    return tok_literal_string;
   }
 
   // Comment until end of line.
-  if (gLastChar == '#') {
+  if (g_last_char == '#') {
     do
-      gLastChar = advance();
-    while (gLastChar != EOF && gLastChar != '\n' && gLastChar != '\r');
+      g_last_char = advance();
+    while (g_last_char != EOF && g_last_char != '\n' && g_last_char != '\r');
 
-    if (gLastChar != EOF)
+    if (g_last_char != EOF)
       return gettok();
   }
 
   // Check for end of file. Don't eat the EOF.
-  if (gLastChar == EOF)
+  if (g_last_char == EOF)
     return tok_eof;
 
-  int ThisChar = gLastChar;
-  gLastChar = advance();
-  return ThisChar;
+  int this_char = g_last_char;
+  g_last_char = advance();
+  return this_char;
 }

@@ -30,19 +30,19 @@ namespace ast {
       Expr_String
     };
   private:
-    SourceLocation Loc;
+    source_location_t Loc;
     ExprKind Kind;
 
   public:
     // lazy implement xd
-    //ExprAST(SourceLocation Loc = CurLoc) : Loc(Loc), Kind(Expr_Binary){}
-    ExprAST(ExprKind K, SourceLocation Loc = CurLoc) : Loc(Loc), Kind(K) {}
+    //ExprAST(source_location_t Loc = CurLoc) : Loc(Loc), Kind(Expr_Binary){}
+    ExprAST(ExprKind K, source_location_t Loc = CurLoc) : Loc(Loc), Kind(K) {}
 
     virtual ~ExprAST() {}
     virtual llvm::Value* codegen() = 0;
-    int getLine() const { return Loc.Line; }
+    int getLine() const { return Loc.line; }
     ExprKind getKind() const { return Kind; }
-    int getCol() const { return Loc.Col; }
+    int getCol() const { return Loc.col; }
     virtual llvm::raw_ostream& dump(llvm::raw_ostream& out, int ind) {
       return out << ':' << getLine() << ':' << getCol() << '\n';
     }
@@ -65,7 +65,7 @@ namespace ast {
     std::string Name;
 
   public:
-    VariableExprAST(SourceLocation Loc, const std::string& Name)
+    VariableExprAST(source_location_t Loc, const std::string& Name)
       : ExprAST(Expr_Variable, Loc), Name(Name) {}
     const std::string& getName() const { return Name; }
     llvm::Value* codegen() override;
@@ -96,7 +96,7 @@ namespace ast {
     std::unique_ptr<ExprAST> LHS, RHS;
 
   public:
-    BinaryExprAST(SourceLocation Loc, char Op, std::unique_ptr<ExprAST> LHS,
+    BinaryExprAST(source_location_t Loc, char Op, std::unique_ptr<ExprAST> LHS,
       std::unique_ptr<ExprAST> RHS)
       : ExprAST(Expr_Binary, Loc), Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
     llvm::Value* codegen() override;
@@ -114,7 +114,7 @@ namespace ast {
     std::vector<std::unique_ptr<ExprAST>> Args;
 
   public:
-    CallExprAST(SourceLocation Loc, const std::string& Callee,
+    CallExprAST(source_location_t Loc, const std::string& Callee,
       std::vector<std::unique_ptr<ExprAST>> Args)
       : ExprAST(Expr_Call, Loc), Callee(Callee), Args(std::move(Args)) {}
     llvm::Value* codegen() override;
@@ -131,7 +131,7 @@ namespace ast {
     std::unique_ptr<ExprAST> Cond, Then, Else;
 
   public:
-    IfExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Cond,
+    IfExprAST(source_location_t Loc, std::unique_ptr<ExprAST> Cond,
       std::unique_ptr<ExprAST> Then, std::unique_ptr<ExprAST> Else)
       : ExprAST(Expr_If, Loc), Cond(std::move(Cond)), Then(std::move(Then)),
       Else(std::move(Else)) {}
@@ -223,11 +223,11 @@ namespace ast {
     int Line;
 
   public:
-    PrototypeAST(SourceLocation Loc, const std::string& Name,
+    PrototypeAST(source_location_t Loc, const std::string& Name,
       std::vector<std::string> Args, std::vector<std::string> ArgTypes,
       bool IsOperator = false, unsigned Prec = 0)
       : Name(Name), Args(std::move(Args)), ArgTypes(std::move(ArgTypes)),
-      IsOperator(IsOperator), Precedence(Prec), Line(Loc.Line) {}
+      IsOperator(IsOperator), Precedence(Prec), Line(Loc.line) {}
 
     llvm::Function* codegen();
     const std::string& getName() const { return Name; }

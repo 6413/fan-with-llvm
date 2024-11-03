@@ -43,7 +43,7 @@ static int GetTokPrecedence() {
 
 /// LogError* - These are little helper functions for error handling.
 static std::unique_ptr<ExprAST> LogError(const char* Str) {
-  fprintf(stderr, "Error: %s %d %d\n", Str, CurLoc.Line, CurLoc.Col);
+  fprintf(stderr, "Error: %s %d %d\n", Str, CurLoc.line, CurLoc.col);
   return nullptr;
 }
 
@@ -56,7 +56,7 @@ static std::unique_ptr<ExprAST> ParseExpression();
 
 /// numberexpr ::= number
 static std::unique_ptr<ExprAST> ParseNumberExpr() {
-  auto Result = std::make_unique<NumberExprAST>(NumVal);
+  auto Result = std::make_unique<NumberExprAST>(double_value);
   getNextToken(); // consume the number
   return std::move(Result);
 }
@@ -78,9 +78,9 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
 ///   ::= identifier
 ///   ::= identifier '(' expression* ')'
 static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
-  std::string IdName = IdentifierStr;
+  std::string IdName = identifier_string;
 
-  SourceLocation LitLoc = CurLoc;
+  source_location_t LitLoc = CurLoc;
 
   getNextToken(); // eat identifier.
 
@@ -114,7 +114,7 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
 
 /// ifexpr ::= 'if' expression 'then' expression 'else' expression
 static std::unique_ptr<ExprAST> ParseIfExpr() {
-  SourceLocation IfLoc = CurLoc;
+  source_location_t IfLoc = CurLoc;
 
   getNextToken(); // eat the if.
 
@@ -149,7 +149,7 @@ static std::unique_ptr<ExprAST> ParseForExpr() {
   getNextToken(); // eat the for.
   if (CurTok != tok_identifier)
     return LogError("expected identifier after for");
-  std::string IdName = IdentifierStr;
+  std::string IdName = identifier_string;
   getNextToken(); // eat identifier.
   if (CurTok != '=')
     return LogError("expected '=' after for");
@@ -224,7 +224,7 @@ static std::unique_ptr<ExprAST> ParseVarExpr() {
     return LogError("expected identifier after var");
 
   while (true) {
-    std::string Name = IdentifierStr;
+    std::string Name = identifier_string;
     getNextToken(); // eat identifier.
 
     // Read the optional initializer.
@@ -281,12 +281,12 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
     return ParseIfExpr();
   case tok_for:
     return ParseForExpr();
-  case tok_var:
+  case tok_variable:
     return ParseVarExpr();
   case tok_eof:
     return nullptr;
-  case tok_string: {
-    auto Result = std::make_unique<StringExprAST>(StringVal);
+  case tok_literal_string: {
+    auto Result = std::make_unique<StringExprAST>(string_value);
     getNextToken();
     return Result;
   }
@@ -325,7 +325,7 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
 
     // Okay, we know this is a binop.
     int BinOp = CurTok;
-    SourceLocation BinLoc = CurLoc;
+    source_location_t BinLoc = CurLoc;
     getNextToken(); // eat binop
 
     // Parse the unary expression after the binary operator.
@@ -368,7 +368,7 @@ static std::unique_ptr<ExprAST> ParseExpression() {
 ///   ::= unary LETTER (id)
 static std::unique_ptr<PrototypeAST> ParsePrototype() {
   std::string FnName;
-  SourceLocation FnLoc = CurLoc;
+  source_location_t FnLoc = CurLoc;
   unsigned Kind = 0;
   unsigned BinaryPrecedence = 30;
 
@@ -376,11 +376,11 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
   default:
     return LogErrorP("Expected function name in prototype");
   case tok_identifier:
-    FnName = IdentifierStr;
+    FnName = identifier_string;
     Kind = 0;
     getNextToken();
     break;
-  case tok_unary:
+  case tok_unary_operator:
     getNextToken();
     if (!isascii(CurTok))
       return LogErrorP("Expected unary operator");
@@ -389,7 +389,7 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
     Kind = 1;
     getNextToken();
     break;
-  case tok_binary:
+  case tok_binary_operator:
     getNextToken();
     if (!isascii(CurTok))
       return LogErrorP("Expected binary operator");
@@ -398,9 +398,9 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
     Kind = 2;
     getNextToken();
     if (CurTok == tok_number) {
-      if (NumVal < 1 || NumVal > 100)
+      if (double_value < 1 || double_value > 100)
         return LogErrorP("Invalid precedence: must be 1..100");
-      BinaryPrecedence = (unsigned)NumVal;
+      BinaryPrecedence = (unsigned)double_value;
       getNextToken();
     }
     break;
@@ -423,7 +423,7 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
       ArgType = "double";  // Recognize double type
     }
     else if (CurTok == tok_identifier) {
-      ArgNames.push_back(IdentifierStr);  // Store the argument name
+      ArgNames.push_back(identifier_string);  // Store the argument name
       ArgTypes.push_back("double");  // Store the argument type
       getNextToken();
       if (CurTok == ',') getNextToken(); // Eat the comma and continue
@@ -439,7 +439,7 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
     if (CurTok != tok_identifier)
       return LogErrorP("Expected argument name");
 
-    ArgNames.push_back(IdentifierStr);  // Store the argument name
+    ArgNames.push_back(identifier_string);  // Store the argument name
     ArgTypes.push_back(ArgType);  // Store the argument type
     getNextToken();  // Move to the next token
 
@@ -510,7 +510,7 @@ static std::unique_ptr<FunctionAST> ParseDefinition() {
 
 /// toplevelexpr ::= expression
 static std::vector<std::unique_ptr<ExprAST>> ParseTopLevelExpr() {
-  SourceLocation FnLoc = CurLoc;
+  source_location_t FnLoc = CurLoc;
   std::vector<std::unique_ptr<ExprAST>> Expressions;
 
   while (auto E = ParseExpression()) {
