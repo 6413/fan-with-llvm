@@ -186,7 +186,11 @@ void code_t::recompile_code() {
   // Finalize the debug info.
   DBuilder->finalize();
 
-  printDebugInfo(*TheModule);
+  std::string str;
+  llvm::raw_string_ostream rso(str);
+  TheModule->print(rso, nullptr);
+  rso.flush();
+  debug_cb(str);
 
 
   // Print out all of the generated code.
@@ -229,4 +233,8 @@ void code_t::recompile_code() {
   pass.run(*TheModule);
   dest.flush();
   outs() << "Wrote " << Filename << "\n";
+}
+
+void code_t::set_debug_cb(const std::function<void(const std::string&)>& cb) {
+  debug_cb = cb;
 }

@@ -1,39 +1,14 @@
-#include "llvm/IR/DIBuilder.h"
-#include "llvm/IR/Module.h"
-#include "llvm/Support/FileSystem.h"
-
 #include <pch.h>
 
 #include <string>
 #include <condition_variable>
 
-extern std::unique_ptr<llvm::LLVMContext> TheContext;
-extern std::unique_ptr<llvm::Module> TheModule;
-extern std::unique_ptr<llvm::DIBuilder> DBuilder;
-
-#include "llvm-ir/lexer.h"
-#include "llvm-ir/ast.h"
-#include "llvm-ir/parser.h"
-#include "llvm-ir/codegen.h"
 #include "llvm-ir/run.h"
-
-
 #include "llvm-ir/library.h"
 
 struct pile_t {
   loco_t loco;
 }pile;
-
-void code_t::printDebugInfo(llvm::Module& M) {
-  static std::string Str;
-  llvm::raw_string_ostream OS(Str);
-  M.print(OS, nullptr);
-  OS.flush();
-  add_task([] {
-    fan::printcl(Str);
-    Str.clear();
-  });
-}
 
 void init_graphics(TextEditor& editor, const char* file_name) {
   static int current_font = 2;
@@ -150,8 +125,14 @@ void t0(code_t* code) {
 }
 
 int main() {
-
   code_t code;
+
+  code.set_debug_cb([](const std::string& info) {
+    add_task([info] {
+      fan::printcl(info);
+    });
+  });
+
   std::jthread t(t0, &code);
   t.detach();
 
