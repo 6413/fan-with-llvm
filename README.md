@@ -12,4 +12,5 @@
 - **Left Ctrl + S**: Save file
 
 Example code:
-![3](https://github.com/user-attachments/assets/08ad17a1-2f47-4392-a6f8-084466607f70)
+![3](https://github.com/user-attachments/assets/84befd6b-1dc7-4aaa-a62d-05bd61153a5e)
+
