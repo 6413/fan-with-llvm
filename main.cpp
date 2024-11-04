@@ -198,21 +198,15 @@ int main() {
       for (uint32_t i = task_id; code_sleep == false && i < task_queue.size(); ++i) {
         task_queue[task_id++]();
         if (code_sleep) {
-          if (sleep_timers[sleep_id].finished() == false) {
-            break;
-          }
-          else {
-            ++sleep_id;
-            code_sleep = false;
-          }
+          sleep_timers[sleep_id].start();
+          break;
         }
       }
       if (task_id == task_queue.size()) {
         task_id = 0;
         processed = false;
         sleep_id = 0;
-        task_queue.clear();
-        sleep_timers.clear();
+        clean_up();
       }
     }
 

@@ -20,9 +20,9 @@ void code_t::init_code() {
   InitializeNativeTargetAsmPrinter();
   InitializeNativeTargetAsmParser();
 
-  KSDbgInfo.di_compile_unit = nullptr;
-  KSDbgInfo.di_type = nullptr;
-  KSDbgInfo.lexical_blocks = {};
+  debug_info.di_compile_unit = nullptr;
+  debug_info.di_type = nullptr;
+  debug_info.lexical_blocks = {};
 
   TheContext = std::unique_ptr<LLVMContext>{};
   TheModule = std::unique_ptr<Module>{};
@@ -62,7 +62,7 @@ void code_t::init_code() {
   // Create the compile unit for the module.
   // Currently down as "fib.ks" as a filename since we're redirecting stdin
   // but we'd like actual source locations.
-  KSDbgInfo.di_compile_unit = DBuilder->createCompileUnit(
+  debug_info.di_compile_unit = DBuilder->createCompileUnit(
     dwarf::DW_LANG_C, DBuilder->createFile("fib.ks", "."), "Kaleidoscope Compiler", false, "", 0);
 
   {
@@ -126,9 +126,9 @@ void code_t::main_loop() {
 
 int code_t::run_code() {
 
-  if (KSDbgInfo.compiled == false) {
+  if (debug_info.compiled == false) {
     // flag 1 corresponds to error - uses fan console highlight enum
-    debug_cb(KSDbgInfo.error_log, 1);
+    debug_cb(debug_info.error_log, 1);
     debug_cb("Failed to compile", 1);
     return 1;
   }
@@ -212,7 +212,7 @@ void code_t::recompile_code() {
   // Finalize the debug info.
   DBuilder->finalize();
 
-  if (KSDbgInfo.compiled) { // ir output
+  if (debug_info.compiled) { // ir output
     std::string str;
     llvm::raw_string_ostream rso(str);
     TheModule->print(rso, nullptr);

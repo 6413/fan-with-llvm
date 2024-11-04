@@ -301,7 +301,7 @@ struct ast_t : lexer_t {
     }
 
     ast_t* get_ast() {
-      return OFFSETLESS(this, ast_t, KSDbgInfo);
+      return OFFSETLESS(this, ast_t, debug_info);
     }
 
     llvm::DIType* getDoubleTy() {
@@ -330,7 +330,7 @@ struct ast_t : lexer_t {
       LogError(location, str);
       return nullptr;
     }
-  }KSDbgInfo;
+  }debug_info;
 
   /// BinopPrecedence - This holds the precedence for each binary operator that is
 /// defined.
