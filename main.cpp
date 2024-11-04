@@ -110,13 +110,17 @@ std::condition_variable g_cv;
 bool ready = false;
 bool processed = false;
 
-void t0(code_t* code) {
+void t0(code_t& code) {
   std::unique_lock lk(g_mutex);
   g_cv.wait(lk, [] { return ready; });
 
-  code->init_code();
-  code->recompile_code();
-  code->run_code();
+  code.init_code();
+  code.recompile_code();
+  add_task([&code] {
+    fan::printclh(loco_t::console_t::highlight_e::success, "Compile time: ", code.compile_time, "ms");
+  });
+
+  code.run_code();
 
   processed = true;
   ready = false;
@@ -127,14 +131,16 @@ void t0(code_t* code) {
 int main() {
   code_t code;
 
-  code.set_debug_cb([](const std::string& info) {
-    add_task([info] {
-      fan::printcl(info);
+  code.set_debug_cb([](const std::string& info, int flags) {
+    add_task([=] {
+      fan::printclh(flags, info);
     });
   });
 
-  std::jthread t(t0, &code);
+  std::jthread t(t0, std::ref(code));
   t.detach();
+
+  pile.loco.render_console = true;
 
   pile.loco.console.commands.add("clear_shapes", [](const fan::commands_t::arg_t& args) {
     shapes.clear();
@@ -159,39 +165,56 @@ int main() {
     g_cv.notify_one();
     };
 
-  uint32_t task_id = 0;
+  uint32_t task_id = 0, sleep_id = 0;
 
   pile.loco.loop([&] {
     ImGui::Begin("window");
     ImGui::SameLine();
 
-    if (ImGui::Button("compile & run")) {
+    if (ImGui::Button("compile & run") && processed == false) {
       compile_and_run();
     }
-    if (pile.loco.input_action.is_active("compile_and_run")) {
+    if (pile.loco.input_action.is_active("compile_and_run") && processed == false) {
       compile_and_run();
     }
     editor.Render("editor");
+    ImGui::End();
+    ImGui::Begin("Content");
+    pile.loco.set_imgui_viewport(pile.loco.orthographic_camera.viewport);
     ImGui::End();
     if (pile.loco.input_action.is_active("save_file")) {
       std::string str = editor.GetText();
       fan::io::file::write(file_name, str.substr(0, std::max(size_t(0), str.size() - 1)), std::ios_base::binary);
     }
 
-    needs_frame_skip = false;
     if (processed) {
-    g_step:
-      task_queue[task_id++]();
+      std::lock_guard<std::mutex> lk(task_queue_mutex);
+      if (code_sleep) {
+        if (sleep_timers[sleep_id].finished()) {
+          ++sleep_id;
+          code_sleep = false;
+        }
+      }
+      for (uint32_t i = task_id; code_sleep == false && i < task_queue.size(); ++i) {
+        task_queue[task_id++]();
+        if (code_sleep) {
+          if (sleep_timers[sleep_id].finished() == false) {
+            break;
+          }
+          else {
+            ++sleep_id;
+            code_sleep = false;
+          }
+        }
+      }
       if (task_id == task_queue.size()) {
         task_id = 0;
-        task_queue.clear();
         processed = false;
-        needs_frame_skip = false;
-      }
-      if (task_queue.size() && needs_frame_skip == false) {
-        goto g_step;
+        sleep_id = 0;
+        task_queue.clear();
+        sleep_timers.clear();
       }
     }
 
-    });
+  });
 }

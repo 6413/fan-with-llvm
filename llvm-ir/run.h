@@ -2,9 +2,7 @@
 
 #include "parser.h"
 
-namespace llvm {
-  struct Module;
-}
+#include <llvm/IR/Module.h>
 
 struct code_t : parser_t {
   void init_code();
@@ -12,6 +10,8 @@ struct code_t : parser_t {
   void main_loop();
   int run_code();
 
-  void set_debug_cb(const std::function<void(const std::string&)>& cb);
-  std::function<void(const std::string&)> debug_cb{ [](const std::string&) {} };
+  void set_debug_cb(const std::function<void(const std::string&, int flags)>& cb);
+  std::function<void(const std::string&, int flags)> debug_cb{ [](const std::string&, int flags) {} };
+  // ms
+  long long compile_time = 0;
 };

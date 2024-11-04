@@ -1,8 +1,6 @@
 #include "run.h"
 
-#include <iostream>
-#include <memory>
-#include <vector>
+#include "../include/KaleidoscopeJIT.h"
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
 #include <llvm/ExecutionEngine/GenericValue.h>
 #include <llvm/Support/TargetSelect.h>
@@ -16,10 +14,6 @@
 #include "codegen.h"
 
 using namespace llvm;
-
-extern debug_info_t KSDbgInfo;
-extern std::unique_ptr<llvm::Module> TheModule;
-extern std::unique_ptr<DIBuilder> DBuilder;
 
 void code_t::init_code() {
   InitializeNativeTarget();
@@ -52,6 +46,9 @@ void code_t::init_code() {
 
   init_module();
 
+  TheModule = std::make_unique<Module>("my cool jit", *TheContext);
+  TheModule->setDataLayout(get_JIT()->getDataLayout());
+
   // Add the current debug info version into the module.
   TheModule->addModuleFlag(Module::Warning, "Debug Info Version", DEBUG_METADATA_VERSION);
 
@@ -69,18 +66,34 @@ void code_t::init_code() {
     dwarf::DW_LANG_C, DBuilder->createFile("fib.ks", "."), "Kaleidoscope Compiler", false, "", 0);
 
   {
-    std::vector<std::string> Args{ "x" }; // parameter names
-    std::vector<Type*> Doubles(Args.size(), Type::getDoubleTy(*TheContext));
-    FunctionType* FT =
-      FunctionType::get(Type::getDoubleTy(*TheContext), Doubles, false);
+    {
+      std::vector<std::string> Args{ "x" }; // parameter names
+      std::vector<Type*> params(Args.size(), Type::getDoubleTy(*TheContext));
+      FunctionType* FT =
+        FunctionType::get(Type::getDoubleTy(*TheContext), params, false);
 
-    Function* F =
-      Function::Create(FT, Function::ExternalLinkage, "printd", TheModule.get());
+      Function* F =
+        Function::Create(FT, Function::ExternalLinkage, "printd", TheModule.get());
 
-    // Set names for all arguments.
-    unsigned Idx = 0;
-    for (auto& Arg : F->args())
-      Arg.setName(Args[Idx++]);
+      // Set names for all arguments.
+      unsigned Idx = 0;
+      for (auto& Arg : F->args())
+        Arg.setName(Args[Idx++]);
+    }
+    {
+      std::vector<std::string> Args{ "x" }; // parameter names
+      std::vector<Type*> params(Args.size(), PointerType::getUnqual(Type::getInt8Ty(*TheContext)));
+      FunctionType* FT =
+        FunctionType::get(Type::getDoubleTy(*TheContext), params, false);
+
+      Function* F =
+        Function::Create(FT, Function::ExternalLinkage, "printcl", TheModule.get());
+
+      // Set names for all arguments.
+      unsigned Idx = 0;
+      for (auto& Arg : F->args())
+        Arg.setName(Args[Idx++]);
+    }
   }
 }
 
@@ -100,6 +113,9 @@ void code_t::main_loop() {
     case tok_extern:
       HandleExtern();
       break;
+    case -0xfffff: {
+      return;
+    }
     default:
       HandleTopLevelExpression();
       break;
@@ -109,6 +125,14 @@ void code_t::main_loop() {
 
 
 int code_t::run_code() {
+
+  if (KSDbgInfo.compiled == false) {
+    // flag 1 corresponds to error - uses fan console highlight enum
+    debug_cb(KSDbgInfo.error_log, 1);
+    debug_cb("Failed to compile", 1);
+    return 1;
+  }
+
   auto start = std::chrono::steady_clock::now();
 
   // Create the JIT engine and move the module into it
@@ -152,8 +176,9 @@ int code_t::run_code() {
   //}
 
   EE->finalizeObject();
-  std::cout << "Time elapsed: " << std::chrono::duration_cast<std::chrono::milliseconds>(
-    std::chrono::steady_clock::now() - start).count() << "ms\n";
+
+  compile_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::steady_clock::now() - start).count();
 
   // Assuming you have a function named 'main' to execute
   Function* MainFn = EE->FindFunctionNamed("main");
@@ -169,6 +194,7 @@ int code_t::run_code() {
     // Print the result
     //fan::printcl("result: ", GV.DoubleVal);
     //std::cout << "Result: " << std::fixed << std::setprecision(0) << GV.DoubleVal << std::endl;
+  return 0;
 }
 
 void code_t::recompile_code() {
@@ -186,11 +212,14 @@ void code_t::recompile_code() {
   // Finalize the debug info.
   DBuilder->finalize();
 
-  std::string str;
-  llvm::raw_string_ostream rso(str);
-  TheModule->print(rso, nullptr);
-  rso.flush();
-  debug_cb(str);
+  if (KSDbgInfo.compiled) { // ir output
+    std::string str;
+    llvm::raw_string_ostream rso(str);
+    TheModule->print(rso, nullptr);
+    rso.flush();
+    debug_cb(str, 0);
+  }
+
 
 
   // Print out all of the generated code.
@@ -235,6 +264,6 @@ void code_t::recompile_code() {
   outs() << "Wrote " << Filename << "\n";
 }
 
-void code_t::set_debug_cb(const std::function<void(const std::string&)>& cb) {
+void code_t::set_debug_cb(const std::function<void(const std::string&, int flags)>& cb) {
   debug_cb = cb;
 }

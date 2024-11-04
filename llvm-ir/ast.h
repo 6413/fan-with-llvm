@@ -28,7 +28,7 @@ struct ast_t : lexer_t {
       Expr_Compound,
       Expr_String
     };
-  private:
+
     source_location_t loc;
     ExprKind Kind;
 
@@ -162,7 +162,6 @@ struct ast_t : lexer_t {
       return llvm::Constant::getNullValue(llvm::Type::getDoubleTy(*TheContext));
     }
     static bool classof(const ExprAST* E) {
-      auto x = E->getKind();
       return E->getKind() == Expr_Compound;
     }
   };
@@ -220,14 +219,14 @@ struct ast_t : lexer_t {
     std::vector<std::string> ArgTypes; // New vector for argument types
     bool IsOperator;
     unsigned Precedence;
-    int Line;
+    source_location_t loc;
 
   public:
-    PrototypeAST(source_location_t loc, const std::string& Name,
-      std::vector<std::string> Args, std::vector<std::string> ArgTypes,
+    PrototypeAST(const source_location_t& loc, const std::string& Name,
+      const std::vector<std::string>& Args, const std::vector<std::string>& ArgTypes,
       bool IsOperator = false, unsigned Prec = 0)
-      : Name(Name), Args(std::move(Args)), ArgTypes(std::move(ArgTypes)),
-      IsOperator(IsOperator), Precedence(Prec), Line(loc.line) {}
+      : Name(Name), Args(Args), ArgTypes(ArgTypes),
+      IsOperator(IsOperator), Precedence(Prec), loc(loc) {}
 
     llvm::Function* codegen(ast_t* ast);
     const std::string& getName() const { return Name; }
@@ -241,7 +240,7 @@ struct ast_t : lexer_t {
     }
 
     unsigned getBinaryPrecedence() const { return Precedence; }
-    int getLine() const { return Line; }
+    int getLine() const { return loc.line; }
   };
 
 
@@ -275,21 +274,63 @@ struct ast_t : lexer_t {
     }
   };
 
-  /// LogError* - These are little helper functions for error handling.
-  std::unique_ptr<ExprAST> LogError(const char* Str) {
-    fprintf(stderr, "Error: %s %d %d\n", Str, cursor_location.line, cursor_location.col);
-    return nullptr;
-  }
+#ifndef OFFSETLESS
+#define OFFSETLESS(ptr_m, t_m, d_m) \
+		((t_m *)((uint8_t *)(ptr_m) - offsetof(t_m, d_m)))
+#endif
 
-  llvm::Value* LogErrorV(const char* Str) {
-    LogError(Str);
-    return nullptr;
-  }
+  struct debug_info_t {
+    llvm::DICompileUnit* di_compile_unit;
+    llvm::DIType* di_type;
+    std::vector<llvm::DIScope*> lexical_blocks;
+    bool compiled = true;
+    std::string error_log;
 
-  std::unique_ptr<PrototypeAST> LogErrorP(const char* Str) {
-    LogError(Str);
-    return nullptr;
-  }
+    void emit_location(auto AST) {
+      if constexpr (std::is_null_pointer_v<decltype(AST)>)
+        return ir_builder->SetCurrentDebugLocation(llvm::DebugLoc());
+      else {
+        llvm::DIScope* Scope;
+        if (lexical_blocks.empty())
+          Scope = di_compile_unit;
+        else
+          Scope = lexical_blocks.back();
+        ir_builder->SetCurrentDebugLocation(llvm::DILocation::get(
+          Scope->getContext(), AST->getLine(), AST->getCol(), Scope));
+      }
+    }
+
+    ast_t* get_ast() {
+      return OFFSETLESS(this, ast_t, KSDbgInfo);
+    }
+
+    llvm::DIType* getDoubleTy() {
+      if (di_type)
+        return di_type;
+
+      di_type = get_ast()->DBuilder->createBasicType("double", 64, llvm::dwarf::DW_ATE_float);
+      return di_type;
+    }
+
+    /// LogError* - These are little helper functions for error handling.
+    std::unique_ptr<ExprAST> LogError(const source_location_t& location, const std::string& str) {
+      error_log += "Error: " + str + ", at " + 
+        std::to_string(location.line) + ":" +
+        std::to_string(location.col) + "\n";
+      compiled = false;
+      return nullptr;
+    }
+
+    llvm::Value* LogErrorV(const source_location_t& location, const std::string& str) {
+      LogError(location, str);
+      return nullptr;
+    }
+
+    std::unique_ptr<PrototypeAST> LogErrorP(const source_location_t& location, const std::string& str) {
+      LogError(location, str);
+      return nullptr;
+    }
+  }KSDbgInfo;
 
   /// BinopPrecedence - This holds the precedence for each binary operator that is
 /// defined.
@@ -303,5 +344,8 @@ struct ast_t : lexer_t {
     {'/', 40},
     { '%', 40 },
   };
+
   std::map<std::string, std::unique_ptr<ast_t::PrototypeAST>> FunctionProtos;
+  std::unique_ptr<llvm::Module> TheModule;
+  std::unique_ptr<llvm::DIBuilder> DBuilder;
 };

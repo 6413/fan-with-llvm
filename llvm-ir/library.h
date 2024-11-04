@@ -10,10 +10,14 @@
 #define DLLEXPORT
 #endif
 
+std::mutex task_queue_mutex;
 inline std::vector<fan::function_t<void()>> task_queue;
+inline std::vector<fan::time::clock> sleep_timers;
 
 static void add_task(auto l) {
-  task_queue.push_back(std::move(l));
+  task_queue_mutex.lock();
+  task_queue.push_back(l);
+  task_queue_mutex.unlock();
 }
 
 /// putchard - putchar that takes a double and returns 0.
@@ -32,6 +36,13 @@ extern "C" DLLEXPORT double printd(double x) {
   });
   return 0;
 }
+extern "C" DLLEXPORT double printcl(const char* x) {
+  add_task([str = std::string(x)] {
+    fan::printcl(str);
+    });
+  return 0;
+}
+
 
 extern "C" DLLEXPORT double string_test(const char* str) {
   fan::print(str);
@@ -74,7 +85,7 @@ extern "C" DLLEXPORT double sprite0(const char* cpath, double px, double py, dou
   return 0;
 }
 
-inline bool needs_frame_skip = false;
+inline bool code_sleep = false;
 
 extern "C" DLLEXPORT double clear() {
   add_task([&] {
@@ -85,8 +96,9 @@ extern "C" DLLEXPORT double clear() {
 
 extern "C" DLLEXPORT double sleep_s(double x) {
   add_task([=] {
-    needs_frame_skip = true;
-    std::this_thread::sleep_for(std::chrono::duration<double>(x));
+    code_sleep = true;
+    sleep_timers.push_back(fan::time::seconds(x));
+    sleep_timers.back().start();
   });
   return 0;
 }

@@ -13,7 +13,7 @@ struct parser_t : ast_t {
   /// CurTok/getNextToken - Provide a simple token buffer.  CurTok is the current
 /// token the parser is looking at.  getNextToken reads another token from the
 /// lexer and updates CurTok with its results.
-  int CurTok = 0;
+  int CurTok = -0xfffff;
   int getNextToken() { return CurTok = gettok(); }
 
   /// GetTokPrecedence - Get the precedence of the pending binary operator token.
@@ -54,7 +54,7 @@ struct parser_t : ast_t {
       return nullptr;
 
     if (CurTok != ')')
-      return LogError("expected ')'");
+      return KSDbgInfo.LogError(cursor_location, "expected ')'");
     getNextToken(); // eat ).
     return V;
   }
@@ -86,7 +86,7 @@ struct parser_t : ast_t {
           break;
 
         if (CurTok != ',')
-          return LogError("Expected ')' or ',' in argument list");
+          return KSDbgInfo.LogError(cursor_location, "Expected ')' or ',' in argument list");
         getNextToken();
       }
     }
@@ -109,7 +109,7 @@ struct parser_t : ast_t {
       return nullptr;
 
     if (CurTok != tok_then)
-      return LogError("expected then");
+      return KSDbgInfo.LogError(cursor_location, "expected then");
     getNextToken(); // eat the then
 
     auto Then = ParseExpression();
@@ -117,7 +117,7 @@ struct parser_t : ast_t {
       return nullptr;
 
     if (CurTok != tok_else)
-      return LogError("expected else");
+      return KSDbgInfo.LogError(cursor_location, "expected else");
 
     getNextToken();
 
@@ -133,17 +133,17 @@ struct parser_t : ast_t {
   std::unique_ptr<ExprAST> ParseForExpr() {
     getNextToken(); // eat the for.
     if (CurTok != tok_identifier)
-      return LogError("expected identifier after for");
+      return KSDbgInfo.LogError(cursor_location, "expected identifier after for");
     std::string IdName = identifier_string;
     getNextToken(); // eat identifier.
     if (CurTok != '=')
-      return LogError("expected '=' after for");
+      return KSDbgInfo.LogError(cursor_location, "expected '=' after for");
     getNextToken(); // eat '='.
     auto Start = ParseExpression();
     if (!Start)
       return nullptr;
     if (CurTok != ',')
-      return LogError("expected ',' after for start value");
+      return KSDbgInfo.LogError(cursor_location, "expected ',' after for start value");
     getNextToken();
     auto End = ParseExpression();
     if (!End)
@@ -157,7 +157,7 @@ struct parser_t : ast_t {
         return nullptr;
     }
     if (CurTok != tok_in)
-      return LogError("expected 'in' after for");
+      return KSDbgInfo.LogError(cursor_location, "expected 'in' after for");
     getNextToken(); // eat 'in'.
 
     // Parse compound body
@@ -179,7 +179,7 @@ struct parser_t : ast_t {
       }
 
       if (CurTok != '}')
-        return LogError("expected '}' after compound expression");
+        return KSDbgInfo.LogError(cursor_location, "expected '}' after compound expression");
       getNextToken(); // eat '}'
 
       // Create compound expression containing all statements
@@ -206,7 +206,7 @@ struct parser_t : ast_t {
 
     // At least one variable name is required.
     if (CurTok != tok_identifier)
-      return LogError("expected identifier after var");
+      return KSDbgInfo.LogError(cursor_location, "expected identifier after var");
 
     while (true) {
       std::string Name = identifier_string;
@@ -230,12 +230,12 @@ struct parser_t : ast_t {
       getNextToken(); // eat the ','.
 
       if (CurTok != tok_identifier)
-        return LogError("expected identifier list after var");
+        return KSDbgInfo.LogError(cursor_location, "expected identifier list after var");
     }
 
     // At this point, we have to have 'in'.
     if (CurTok != tok_in)
-      return LogError("expected 'in' keyword after 'var'");
+      return KSDbgInfo.LogError(cursor_location, "expected 'in' keyword after 'var'");
     getNextToken(); // eat 'in'.
 
     auto Body = ParseExpression();
@@ -255,7 +255,7 @@ struct parser_t : ast_t {
   std::unique_ptr<ExprAST> ParsePrimary() {
     switch (CurTok) {
     default:
-      return LogError("unknown token when expecting an expression");
+      return KSDbgInfo.LogError(cursor_location, "unknown token when expecting an expression");
     case tok_identifier:
       return ParseIdentifierExpr();
     case tok_number:
@@ -345,7 +345,7 @@ struct parser_t : ast_t {
 
     switch (CurTok) {
     default:
-      return LogErrorP("Expected function name in prototype");
+      return KSDbgInfo.LogErrorP(cursor_location, "Expected function name in prototype");
     case tok_identifier:
       FnName = identifier_string;
       Kind = 0;
@@ -354,7 +354,7 @@ struct parser_t : ast_t {
     case tok_unary_operator:
       getNextToken();
       if (!isascii(CurTok))
-        return LogErrorP("Expected unary operator");
+        return KSDbgInfo.LogErrorP(cursor_location, "Expected unary operator");
       FnName = "unary";
       FnName += (char)CurTok;
       Kind = 1;
@@ -363,14 +363,14 @@ struct parser_t : ast_t {
     case tok_binary_operator:
       getNextToken();
       if (!isascii(CurTok))
-        return LogErrorP("Expected binary operator");
+        return KSDbgInfo.LogErrorP(cursor_location, "Expected binary operator");
       FnName = "binary";
       FnName += (char)CurTok;
       Kind = 2;
       getNextToken();
       if (CurTok == tok_number) {
         if (double_value < 1 || double_value > 100)
-          return LogErrorP("Invalid precedence: must be 1..100");
+          return KSDbgInfo.LogErrorP(cursor_location, "Invalid precedence: must be 1..100");
         BinaryPrecedence = (unsigned)double_value;
         getNextToken();
       }
@@ -378,7 +378,7 @@ struct parser_t : ast_t {
     }
 
     if (CurTok != '(')
-      return LogErrorP("Expected '(' in prototype");
+      return KSDbgInfo.LogErrorP(cursor_location, "Expected '(' in prototype");
 
     std::vector<std::string> ArgNames;
     std::vector<std::string> ArgTypes;
@@ -402,13 +402,13 @@ struct parser_t : ast_t {
         else if (CurTok == tok_identifier) continue;
       }
       else {
-        return LogErrorP("Expected type specifier before argument name");
+        return KSDbgInfo.LogErrorP(cursor_location, "Expected type specifier before argument name");
       }
 
       getNextToken();  // Move to argument name
 
       if (CurTok != tok_identifier)
-        return LogErrorP("Expected argument name");
+        return KSDbgInfo.LogErrorP(cursor_location, "Expected argument name");
 
       ArgNames.push_back(identifier_string);  // Store the argument name
       ArgTypes.push_back(ArgType);  // Store the argument type
@@ -421,12 +421,12 @@ struct parser_t : ast_t {
     }
 
     if (CurTok != ')') {
-      return LogErrorP("Expected ',' or ')' in argument list");
+      return KSDbgInfo.LogErrorP(cursor_location, "Expected ',' or ')' in argument list");
     }
     getNextToken();  // eat ')'
 
     if (Kind && ArgNames.size() != Kind)
-      return LogErrorP("Invalid number of operands for operator");
+      return KSDbgInfo.LogErrorP(cursor_location, "Invalid number of operands for operator");
 
     return std::make_unique<PrototypeAST>(FnLoc, FnName, ArgNames, ArgTypes, Kind != 0, BinaryPrecedence);
   }
@@ -457,7 +457,7 @@ struct parser_t : ast_t {
       }
 
       if (CurTok != '}') {
-        LogError("Expected '}' in function body");
+        KSDbgInfo.LogError(cursor_location, "Expected '}' in function body");
         return nullptr;
       }
       getNextToken();  // eat '}'
@@ -476,7 +476,6 @@ struct parser_t : ast_t {
 
   /// toplevelexpr ::= expression
   std::vector<std::unique_ptr<ExprAST>> ParseTopLevelExpr() {
-    source_location_t FnLoc = cursor_location;
     std::vector<std::unique_ptr<ExprAST>> Expressions;
 
     while (auto E = ParseExpression()) {
@@ -543,7 +542,7 @@ struct parser_t : ast_t {
     auto fn_ast = std::make_unique<FunctionAST>(std::move(Proto), std::move(Body));
     if (fn_ast) {
       if (!fn_ast->codegen(this)) {
-        fprintf(stderr, "Error generating code for top level expr\n");
+        KSDbgInfo.LogError(cursor_location, "Error generating code for top level expr");
       }
     }
     else {

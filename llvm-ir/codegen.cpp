@@ -26,30 +26,13 @@ ExitOnError ExitOnErr;
 std::map<std::string, AllocaInst*> NamedValues;
 std::unique_ptr<KaleidoscopeJIT> TheJIT;
 
-std::unique_ptr<LLVMContext> TheContext;
-std::unique_ptr<Module> TheModule;
 std::unique_ptr<IRBuilder<>> ir_builder;
 
-std::unique_ptr<DIBuilder> DBuilder;
+std::unique_ptr<LLVMContext> TheContext;
 
-debug_info_t KSDbgInfo;
-
-
-//===----------------------------------------------------------------------===//
-// Debug Info Support
-//===----------------------------------------------------------------------===//
-
-DIType* debug_info_t::getDoubleTy() {
-  if (di_type)
-    return di_type;
-
-  di_type = DBuilder->createBasicType("double", 64, dwarf::DW_ATE_float);
-  return di_type;
-}
-
-static DISubroutineType* CreateFunctionType(unsigned NumArgs) {
+static DISubroutineType* CreateFunctionType(ast_t* ast, unsigned NumArgs) {
   SmallVector<Metadata*, 8> EltTys;
-  DIType* DblTy = KSDbgInfo.getDoubleTy();
+  DIType* DblTy = ast->KSDbgInfo.getDoubleTy();
 
   // Add the result type.
   EltTys.push_back(DblTy);
@@ -57,7 +40,7 @@ static DISubroutineType* CreateFunctionType(unsigned NumArgs) {
   for (unsigned i = 0, e = NumArgs; i != e; ++i)
     EltTys.push_back(DblTy);
 
-  return DBuilder->createSubroutineType(DBuilder->getOrCreateTypeArray(EltTys));
+  return ast->DBuilder->createSubroutineType(ast->DBuilder->getOrCreateTypeArray(EltTys));
 }
 
 
@@ -85,15 +68,13 @@ std::unique_ptr<KaleidoscopeJIT>& get_JIT() {
 void init_module() {
   // Open a new module.
   TheContext = std::make_unique<LLVMContext>();
-  TheModule = std::make_unique<Module>("my cool jit", *TheContext);
-  TheModule->setDataLayout(get_JIT()->getDataLayout());
 
   ir_builder = std::make_unique<IRBuilder<>>(*TheContext);
 }
 
 Function* getFunction(ast_t* ast, std::string Name) {
   // First, see if the function has already been added to the current module.
-  if (auto* F = TheModule->getFunction(Name))
+  if (auto* F = ast->TheModule->getFunction(Name))
     return F;
 
   // If not, check whether we can codegen the declaration from some existing
@@ -116,7 +97,7 @@ static AllocaInst* CreateEntryBlockAlloca(Function* TheFunction,
 }
 
 Value* ast_t::NumberExprAST::codegen(ast_t* ast) {
-  KSDbgInfo.emit_location(this);
+  ast->KSDbgInfo.emit_location(this);
   return ConstantFP::get(*TheContext, APFloat(Val));
 }
 
@@ -124,9 +105,9 @@ Value* ast_t::VariableExprAST::codegen(ast_t* ast) {
   // Look this variable up in the function.
   Value* V = NamedValues[Name];
   if (!V)
-    return ast->LogErrorV("Unknown variable name");
+    return ast->KSDbgInfo.LogErrorV(this->loc, "Unknown variable name");
 
-  KSDbgInfo.emit_location(this);
+  ast->KSDbgInfo.emit_location(this);
   // Load the value.
   // PointerType::getUnqual(i8*)
   return ir_builder->CreateLoad(Type::getDoubleTy(*TheContext), V, Name.c_str());
@@ -139,14 +120,14 @@ Value* ast_t::UnaryExprAST::codegen(ast_t* ast) {
 
   Function* F = getFunction(ast, std::string("unary") + Opcode);
   if (!F)
-    return ast->LogErrorV("Unknown unary operator");
+    return ast->KSDbgInfo.LogErrorV(this->loc, "Unknown unary operator");
 
-  KSDbgInfo.emit_location(this);
+  ast->KSDbgInfo.emit_location(this);
   return ir_builder->CreateCall(F, OperandV, "unop");
 }
 
 Value* ast_t::BinaryExprAST::codegen(ast_t* ast) {
-  KSDbgInfo.emit_location(this);
+  ast->KSDbgInfo.emit_location(this);
 
   // Special case '=' because we don't want to emit the LHS as an expression.
   if (Op == '=') {
@@ -156,7 +137,7 @@ Value* ast_t::BinaryExprAST::codegen(ast_t* ast) {
     // dynamic_cast for automatic error checking.
     VariableExprAST* LHSE = static_cast<VariableExprAST*>(LHS.get());
     if (!LHSE)
-      return ast->LogErrorV("destination of '=' must be a variable");
+      return ast->KSDbgInfo.LogErrorV(this->loc, "destination of '=' must be a variable");
     // Codegen the RHS.
     Value* Val = RHS->codegen(ast);
     if (!Val)
@@ -165,7 +146,7 @@ Value* ast_t::BinaryExprAST::codegen(ast_t* ast) {
     // Look up the name.
     Value* Variable = NamedValues[LHSE->getName()];
     if (!Variable)
-      return ast->LogErrorV("Unknown variable name");
+      return ast->KSDbgInfo.LogErrorV(this->loc, "Unknown variable name");
 
     ir_builder->CreateStore(Val, Variable);
     return Val;
@@ -196,14 +177,14 @@ Value* ast_t::BinaryExprAST::codegen(ast_t* ast) {
       return ir_builder->CreateSRem(L, R, "modtmp");
     }
     else if (L->getType()->isFloatingPointTy() && R->getType()->isFloatingPointTy()) {
-      Function* FloorF = Intrinsic::getDeclaration(TheModule.get(), Intrinsic::floor, Type::getDoubleTy(*TheContext));
+      Function* FloorF = Intrinsic::getDeclaration(ast->TheModule.get(), Intrinsic::floor, Type::getDoubleTy(*TheContext));
       Value* Div = ir_builder->CreateFDiv(L, R, "divtmp");
       Value* FloorDiv = ir_builder->CreateCall(FloorF, { Div }, "floordivtmp");
       Value* Mult = ir_builder->CreateFMul(FloorDiv, R, "multtmp");
       return ir_builder->CreateFSub(L, Mult, "modtmp");
     }
     else {
-      return ast->LogErrorV("Operands to % must be both integers or both floats.");
+      return ast->KSDbgInfo.LogErrorV(this->loc, "Operands to % must be both integers or both floats.");
     }
   }
   default:
@@ -220,16 +201,16 @@ Value* ast_t::BinaryExprAST::codegen(ast_t* ast) {
 }
 
 Value* ast_t::CallExprAST::codegen(ast_t* ast) {
-  KSDbgInfo.emit_location(this);
+  ast->KSDbgInfo.emit_location(this);
 
   // Look up the name in the global module table.
   Function* CalleeF = getFunction(ast, Callee);
   if (!CalleeF)
-    return ast->LogErrorV("Unknown function referenced");
+    return ast->KSDbgInfo.LogErrorV(this->loc, "Unknown function referenced:" + Callee);
 
   // If argument mismatch error.
   if (CalleeF->arg_size() != Args.size())
-    return ast->LogErrorV("Incorrect # arguments passed");
+    return ast->KSDbgInfo.LogErrorV(this->loc, "Incorrect # arguments passed");
 
   std::vector<Value*> ArgsV;
   for (unsigned i = 0, e = Args.size(); i != e; ++i) {
@@ -242,7 +223,7 @@ Value* ast_t::CallExprAST::codegen(ast_t* ast) {
 }
 
 Value* ast_t::IfExprAST::codegen(ast_t* ast) {
-  KSDbgInfo.emit_location(this);
+  ast->KSDbgInfo.emit_location(this);
 
   Value* CondV = Cond->codegen(ast);
   if (!CondV)
@@ -318,7 +299,7 @@ Value* ast_t::ForExprAST::codegen(ast_t* ast) {
   Function* TheFunction = ir_builder->GetInsertBlock()->getParent();
   // Create an alloca for the variable in the entry block.
   AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, VarName);
-  KSDbgInfo.emit_location(this);
+  ast->KSDbgInfo.emit_location(this);
   // Emit the start code first, without 'variable' in scope.
   Value* StartVal = Start->codegen(ast);
   if (!StartVal)
@@ -426,7 +407,7 @@ Value* ast_t::VarExprAST::codegen(ast_t* ast) {
     NamedValues[VarName] = Alloca;
   }
 
-  KSDbgInfo.emit_location(this);
+  ast->KSDbgInfo.emit_location(this);
 
   // Codegen the body, now that all vars are in scope.
   Value* BodyVal = Body->codegen(ast);
@@ -454,7 +435,7 @@ Function* ast_t::PrototypeAST::codegen(ast_t* ast) {
       ArgTypesLLVM.push_back(PointerType::getUnqual(Type::getInt8Ty(*TheContext)));
     }
     else {
-      ast->LogError("Unknown argument type");
+      ast->KSDbgInfo.LogError(this->loc, "Unknown argument type");
       return nullptr;
     }
   }
@@ -463,7 +444,7 @@ Function* ast_t::PrototypeAST::codegen(ast_t* ast) {
   FunctionType* FT = FunctionType::get(Type::getDoubleTy(*TheContext), ArgTypesLLVM, false);
 
   // Create the function
-  Function* F = Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
+  Function* F = Function::Create(FT, Function::ExternalLinkage, Name, ast->TheModule.get());
 
   // Set names for all arguments
   unsigned Idx = 0;
@@ -486,29 +467,29 @@ Function* ast_t::FunctionAST::codegen(ast_t* ast) {
   ir_builder->SetInsertPoint(BB);
 
   // Debug info setup
-  DIFile* Unit = DBuilder->createFile(KSDbgInfo.di_compile_unit->getFilename(),
-    KSDbgInfo.di_compile_unit->getDirectory());
+  DIFile* Unit = ast->DBuilder->createFile(ast->KSDbgInfo.di_compile_unit->getFilename(),
+    ast->KSDbgInfo.di_compile_unit->getDirectory());
   DIScope* FContext = Unit;
   unsigned LineNo = P.getLine();
   unsigned ScopeLine = LineNo;
-  DISubprogram* SP = DBuilder->createFunction(FContext, P.getName(), StringRef(), Unit, LineNo, CreateFunctionType(TheFunction->arg_size()), ScopeLine, DINode::FlagPrototyped, DISubprogram::SPFlagDefinition);
+  DISubprogram* SP = ast->DBuilder->createFunction(FContext, P.getName(), StringRef(), Unit, LineNo, CreateFunctionType(ast, TheFunction->arg_size()), ScopeLine, DINode::FlagPrototyped, DISubprogram::SPFlagDefinition);
   TheFunction->setSubprogram(SP);
 
-  KSDbgInfo.lexical_blocks.push_back(SP);
-  KSDbgInfo.emit_location(nullptr);
+  ast->KSDbgInfo.lexical_blocks.push_back(SP);
+  ast->KSDbgInfo.emit_location(nullptr);
 
   // Record the function arguments in the NamedValues map
   NamedValues.clear();
   unsigned ArgIdx = 0;
   for (auto& Arg : TheFunction->args()) {
     AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, Arg.getName());
-    DILocalVariable* D = DBuilder->createParameterVariable(SP, Arg.getName(), ++ArgIdx, Unit, LineNo, KSDbgInfo.getDoubleTy(), true);
-    DBuilder->insertDeclare(Alloca, D, DBuilder->createExpression(), DILocation::get(SP->getContext(), LineNo, 0, SP), ir_builder->GetInsertBlock());
+    DILocalVariable* D = ast->DBuilder->createParameterVariable(SP, Arg.getName(), ++ArgIdx, Unit, LineNo, ast->KSDbgInfo.getDoubleTy(), true);
+    ast->DBuilder->insertDeclare(Alloca, D, ast->DBuilder->createExpression(), DILocation::get(SP->getContext(), LineNo, 0, SP), ir_builder->GetInsertBlock());
     ir_builder->CreateStore(&Arg, Alloca);
     NamedValues[std::string(Arg.getName())] = Alloca;
   }
 
-  KSDbgInfo.emit_location(Body.get());
+  ast->KSDbgInfo.emit_location(Body.get());
 
   // Generate code for the body
   Value* RetVal = Body->codegen(ast);
@@ -516,14 +497,14 @@ Function* ast_t::FunctionAST::codegen(ast_t* ast) {
     TheFunction->eraseFromParent();
     if (P.isBinaryOp())
       ast->BinopPrecedence.erase(Proto->getOperatorName());
-    KSDbgInfo.lexical_blocks.pop_back();
+    ast->KSDbgInfo.lexical_blocks.pop_back();
     return nullptr;
   }
 
   // Create return instruction
   ir_builder->CreateRet(RetVal);
 
-  KSDbgInfo.lexical_blocks.pop_back();
+  ast->KSDbgInfo.lexical_blocks.pop_back();
 
   verifyFunction(*TheFunction);
 

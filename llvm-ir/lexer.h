@@ -39,27 +39,6 @@ enum token_e {
   tok_type_double,
 };
 
-struct debug_info_t {
-  llvm::DICompileUnit* di_compile_unit;
-  llvm::DIType* di_type;
-  std::vector<llvm::DIScope*> lexical_blocks;
-
-  void emit_location(auto AST) {
-    if constexpr (std::is_null_pointer_v<decltype(AST)>)
-      return ir_builder->SetCurrentDebugLocation(llvm::DebugLoc());
-    else {
-      llvm::DIScope* Scope;
-      if (lexical_blocks.empty())
-        Scope = di_compile_unit;
-      else
-        Scope = lexical_blocks.back();
-      ir_builder->SetCurrentDebugLocation(llvm::DILocation::get(
-        Scope->getContext(), AST->getLine(), AST->getCol(), Scope));
-    }
-  }
-  llvm::DIType* getDoubleTy();
-};
-
 struct source_location_t {
   int line;
   int col;
@@ -173,6 +152,6 @@ struct lexer_t {
   std::string identifier_string;
   std::string string_value;
   double double_value;
-  int index = 0;
+  std::size_t index = 0;
   int last_char = ' ';
 };
