@@ -13,15 +13,32 @@ struct parser_t : ast_t {
   /// CurTok/getNextToken - Provide a simple token buffer.  CurTok is the current
 /// token the parser is looking at.  getNextToken reads another token from the
 /// lexer and updates CurTok with its results.
-  int CurTok = -0xfffff;
-  int getNextToken() { return CurTok = gettok(); }
+  int CurTok = 0;
+  int getNextToken() { 
+    CurTok = gettok();
+    if (lexer_t::parser_errors.size()) {
+      debug_info.LogError(lexer_t::parser_errors);
+      lexer_t::parser_errors.clear();
+    }
+    return CurTok;
+  }
 
   /// GetTokPrecedence - Get the precedence of the pending binary operator token.
   int GetTokPrecedence() {
     if (!isascii(CurTok))
       return -1;
 
-    // Make sure it's a declared binop.
+    static constexpr const char allowed_chars[] = { 
+      '(', ')', '{', '}', ',', ';', '=', 
+    };
+
+    if (BinopPrecedence.find(CurTok) == BinopPrecedence.end() && 
+      std::find(allowed_chars, allowed_chars + sizeof(allowed_chars), CurTok)  == allowed_chars + sizeof(allowed_chars)
+      ) {
+      debug_info.LogError(cursor_location, std::string("unknown binary operator '") + (char)CurTok + "'");
+      return -1;
+    }
+
     int TokPrec = BinopPrecedence[CurTok];
     if (TokPrec <= 0)
       return -1;

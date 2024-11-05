@@ -118,9 +118,25 @@ Value* ast_t::UnaryExprAST::codegen(ast_t* ast) {
   if (!OperandV)
     return nullptr;
 
+  switch (Opcode) {
+    case '!': {
+      Value* Zero = ConstantFP::get(OperandV->getType(), 0.0);
+      Value* Cmp = ir_builder->CreateFCmpOEQ(OperandV, Zero, "cmptmp");
+      return ir_builder->CreateUIToFP(Cmp, Type::getDoubleTy(*TheContext), "booltmp");
+    }
+    case '&': {
+      Value* One = ConstantFP::get(OperandV->getType(), 1.0);
+      Value* AndResult = ir_builder->CreateAnd(OperandV, One, "andtmp");
+      return ir_builder->CreateUIToFP(AndResult, Type::getDoubleTy(*TheContext), "booltmp");
+    }
+    case '-': {
+      Value* Neg = ir_builder->CreateFNeg(OperandV, "negtmp"); return Neg;
+    }
+  }
+
   Function* F = getFunction(ast, std::string("unary") + Opcode);
   if (!F)
-    return ast->debug_info.LogErrorV(this->loc, "Unknown unary operator");
+     return ast->debug_info.LogErrorV(this->loc, "Unknown unary operator");
 
   ast->debug_info.emit_location(this);
   return ir_builder->CreateCall(F, OperandV, "unop");
@@ -167,7 +183,6 @@ Value* ast_t::BinaryExprAST::codegen(ast_t* ast) {
   case '/': return ir_builder->CreateFDiv(L, R, "divtmp");
   case '<':
     L = ir_builder->CreateFCmpULT(L, R, "cmptmp");
-    // Convert bool 0/1 to double 0.0 or 1.0
     return ir_builder->CreateUIToFP(L, Type::getDoubleTy(*TheContext), "booltmp");
   case '>':
     L = ir_builder->CreateFCmpUGT(L, R, "cmptmp");
@@ -185,6 +200,31 @@ Value* ast_t::BinaryExprAST::codegen(ast_t* ast) {
     }
     else {
       return ast->debug_info.LogErrorV(this->loc, "Operands to % must be both integers or both floats.");
+    }
+  }
+  case '|': {
+    if (L->getType()->isFloatingPointTy() && R->getType()->isFloatingPointTy()) {
+      Value* Zero = ConstantFP::get(L->getType(), 0.0);
+      L = ir_builder->CreateFCmpUNE(L, Zero, "cmpL");
+      R = ir_builder->CreateFCmpUNE(R, Zero, "cmpR");
+      Value* OrResult = ir_builder->CreateOr(L, R, "ortmp");
+      return ir_builder->CreateUIToFP(OrResult, Type::getDoubleTy(*TheContext), "booltmp");
+    }
+    else {
+      return ir_builder->CreateOr(L, R, "ortmp");
+    }
+  }
+  case '&': {
+    if (L->getType()->isFloatingPointTy() && R->getType()->isFloatingPointTy()) {
+      // Compare if both are non-zero (considering floating-point values)
+      Value* Zero = ConstantFP::get(L->getType(), 0.0);
+      L = ir_builder->CreateFCmpUNE(L, Zero, "cmpL");
+      R = ir_builder->CreateFCmpUNE(R, Zero, "cmpR");
+      Value* AndResult = ir_builder->CreateAnd(L, R, "andtmp");
+      return ir_builder->CreateUIToFP(AndResult, Type::getDoubleTy(*TheContext), "booltmp");
+    }
+    else {
+      return ir_builder->CreateAnd(L, R, "andtmp");
     }
   }
   default:

@@ -11,39 +11,15 @@ extern rectangle0(px py sx sy);
 extern rectangle1(px py sx sy color angle);
 
 extern sprite0(string path px py sx sy);
+extern sprite1(string path px py sx sy angle);
+extern sprite2(string path px py sx sy anglex angley anglez);
 
 
-# Logical unary not.
-def unary!(v)
-  if v then
-    0
-  else
-    1
-
-# Unary negate.
-def unary-(v)
-  0-v
-
-# Binary logical or, which does not short circuit.
-def binary| 5 (LHS RHS)
-  if LHS then
-    1
-  else if RHS then
-    1
-  else
-    0
-
-def bin_a(x y)
-  if !x then
-    0
-  else
-    !!y
-
-def f0_60(x) bin_a(x > -1, x < 60)
-def f60_120(x) bin_a(x > 59, x < 120)
-def f120_180(x) bin_a(x > 119, x < 180)
-def f180_240(x) bin_a(x > 179, x < 240)
-def f240_300(x) bin_a(x > 239, x < 300)
+def f0_60(x) (x > -1) & (x < 60)
+def f60_120(x) (x > 59) & (x < 120)
+def f120_180(x) (x > 119) & (x < 180)
+def f180_240(x) (x > 179) & (x < 240)
+def f240_300(x) (x > 239) & (x < 300)
 
 def clamp_255(x)
   if x > 255 then
@@ -78,7 +54,8 @@ def animate_grid(px py sx sy steps delay rows cols) {
         var color = hue_to_rgb32B(((360 / steps) * i + layer_offset) % 360) in
         var angle = 0 in  # Radians
         var rect_size = sx + 5 * sin(i * 0.1 + c) in
-        rectangle1(px + c * (rect_size + 10) + layer_offset, py + r * (rect_size + 10) + layer_offset, rect_size, rect_size, color, angle)
+       	rectangle1(px + c * (rect_size + 10) + layer_offset, py + r * (rect_size + 10) + layer_offset, rect_size, rect_size, color, angle)
+        sprite2("images/duck.webp", 800, 400, 300, 300, 0, sin(i * 0.05), sin(i * 0.05))
       }
     }
     sleep_s(0.01)
@@ -86,15 +63,8 @@ def animate_grid(px py sx sy steps delay rows cols) {
 }
 
 def main() {
-	for i = 0, i < 10, 1.0 in {
-    sprite0("images/duck.webp", 400, 400, 400, 400)
+	for i = 0, i < 3, 1.0 in {
 		animate_grid(100, 200, 15, 15, 500, 0.05, 10, 10)		
 		clear()
 	}
 }
-main();
-
-
-
-
-

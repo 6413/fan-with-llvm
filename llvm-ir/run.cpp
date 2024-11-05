@@ -20,9 +20,7 @@ void code_t::init_code() {
   InitializeNativeTargetAsmPrinter();
   InitializeNativeTargetAsmParser();
 
-  debug_info.di_compile_unit = nullptr;
-  debug_info.di_type = nullptr;
-  debug_info.lexical_blocks = {};
+  debug_info.init();
 
   TheContext = std::unique_ptr<LLVMContext>{};
   TheModule = std::unique_ptr<Module>{};
@@ -94,6 +92,10 @@ void code_t::init_code() {
       for (auto& Arg : F->args())
         Arg.setName(Args[Idx++]);
     }
+    {
+      //CreateUnaryPrototype('!', this);
+     // CreateUnaryPrototype('|', this);
+    }
   }
 }
 
@@ -113,7 +115,7 @@ void code_t::main_loop() {
     case tok_extern:
       HandleExtern();
       break;
-    case -0xfffff: {
+    case 0: {
       return;
     }
     default:
@@ -130,17 +132,16 @@ int code_t::run_code() {
     // flag 1 corresponds to error - uses fan console highlight enum
     debug_cb(debug_info.error_log, 1);
     debug_cb("Failed to compile", 1);
+    TheModule.reset();// idk why this needs to be here, otherwise corruption, maybe destruction order?
     return 1;
   }
-
-  auto start = std::chrono::steady_clock::now();
 
   // Create the JIT engine and move the module into it
   std::string ErrorStr;
   std::unique_ptr<ExecutionEngine> EE(
     EngineBuilder(std::move(TheModule))
     .setErrorStr(&ErrorStr)
-    .setOptLevel(CodeGenOptLevel::None)
+    .setOptLevel(CodeGenOptLevel::Default)
     .create()
   );
 
@@ -177,9 +178,6 @@ int code_t::run_code() {
 
   EE->finalizeObject();
 
-  compile_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-    std::chrono::steady_clock::now() - start).count();
-
   // Assuming you have a function named 'main' to execute
   Function* MainFn = EE->FindFunctionNamed("main");
   if (!MainFn) {
@@ -198,6 +196,8 @@ int code_t::run_code() {
 }
 
 void code_t::recompile_code() {
+  auto start = std::chrono::steady_clock::now();
+
   InitializeAllTargetInfos();
   InitializeAllTargets();
   InitializeAllTargetMCs();
@@ -212,18 +212,16 @@ void code_t::recompile_code() {
   // Finalize the debug info.
   DBuilder->finalize();
 
-  if (debug_info.compiled) { // ir output
-    std::string str;
-    llvm::raw_string_ostream rso(str);
-    TheModule->print(rso, nullptr);
-    rso.flush();
-    debug_cb(str, 0);
+  if (debug_info.compiled == false) {
+    return;
   }
 
-
-
-  // Print out all of the generated code.
-  //TheModule->print(errs(), nullptr);
+  // ir output
+  std::string str;
+  llvm::raw_string_ostream rso(str);
+  TheModule->print(rso, nullptr);
+  rso.flush();
+  debug_cb(str, 0);
 
   auto TargetTriple = sys::getDefaultTargetTriple();
   TheModule->setTargetTriple(TargetTriple);
@@ -243,7 +241,6 @@ void code_t::recompile_code() {
   TargetOptions opt;
   auto TheTargetMachine = Target->createTargetMachine(TargetTriple, CPU, Features, opt, Reloc::PIC_);
   TheModule->setDataLayout(TheTargetMachine->createDataLayout());
-
   auto Filename = "output.o";
   std::error_code EC;
   raw_fd_ostream dest(Filename, EC, sys::fs::OF_None);

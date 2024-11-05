@@ -51,6 +51,9 @@ struct lexer_t {
       lex_location.line++;
       lex_location.col = 0;
     }
+    else if (last_char == '\t') { // Assuming a tab width of 2 columns 
+      lex_location.col += tab_size - (lex_location.col % tab_size);
+    }
     else {
       lex_location.col++;
     }
@@ -62,12 +65,34 @@ struct lexer_t {
     return last_char;
   }
 
+  std::string parser_errors;
+
   int gettok() {
+
     // Skip any whitespace.
     while (isspace(last_char))
       last_char = advance();
 
     cursor_location = lex_location;
+
+    // Check for multi-line comment start
+    if (last_char == '\'') {
+      last_char = advance();
+      if (last_char == '\'') {
+        last_char = advance();
+        if (last_char == '\'') {
+          if (handle_multiline_comment() == false) {
+            parser_errors += "Unterminated multiline comment at " + std::to_string(lex_location.line) + ":" + std::to_string(lex_location.col) + "\n";
+          }
+          return gettok();
+        }
+      }
+    }
+
+    // Skip any whitespace.
+    while (isspace(last_char))
+      last_char = advance();
+
 
     // Identifier: [a-zA-Z_][a-zA-Z0-9_]*
     if (isalpha(last_char) || last_char == '_') {
@@ -145,7 +170,28 @@ struct lexer_t {
     last_char = advance();
     return this_char;
   }
+  bool handle_multiline_comment() {
+    while (true) {
+      int ch = advance();
+      if (ch == EOF) return false; // this should never come
 
+      if (ch == '\'') {
+        ch = advance();
+        if (ch == '\'') {
+          ch = advance();
+          if (ch == '\'') {
+            return true;
+          }
+          else {
+            return false;
+          }
+        }
+        else {
+          return false;
+        }
+      }
+    }
+  }
   source_location_t cursor_location;
   source_location_t lex_location = { 1, 0 };
   std::string code_input = "";
@@ -154,4 +200,5 @@ struct lexer_t {
   double double_value;
   std::size_t index = 0;
   int last_char = ' ';
+  int tab_size = 4;
 };

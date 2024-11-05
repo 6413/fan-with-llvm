@@ -12,6 +12,4 @@ struct code_t : parser_t {
 
   void set_debug_cb(const std::function<void(const std::string&, int flags)>& cb);
   std::function<void(const std::string&, int flags)> debug_cb{ [](const std::string&, int flags) {} };
-  // ms
-  long long compile_time = 0;
 };

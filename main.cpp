@@ -115,12 +115,18 @@ void t0(code_t& code) {
   g_cv.wait(lk, [] { return ready; });
 
   code.init_code();
+  fan::time::clock c;
+  c.start();
+
   code.recompile_code();
-  add_task([&code] {
-    fan::printclh(loco_t::console_t::highlight_e::success, "Compile time: ", code.compile_time, "ms");
-  });
+  uint64_t compile_time = c.elapsed();
 
   code.run_code();
+
+  lib_queue.push_back([elapsed = c.elapsed(), compile_time] {
+    fan::printclh(loco_t::console_t::highlight_e::success, "Compile time: ", compile_time / 1e6, "ms");
+    fan::printclh(loco_t::console_t::highlight_e::success, "Program boot time: ", elapsed / 1e6, "ms");
+  });
 
   processed = true;
   ready = false;
@@ -128,12 +134,18 @@ void t0(code_t& code) {
   t0(code);
 }
 
+struct debug_info_t {
+  std::string info;
+  int flags;
+};
+
 int main() {
   code_t code;
 
-  code.set_debug_cb([](const std::string& info, int flags) {
-    add_task([=] {
-      fan::printclh(flags, info);
+  std::vector<debug_info_t> debug_info;
+  code.set_debug_cb([&debug_info](const std::string& info, int flags) {
+    lib_queue.push_back([=, &debug_info] {
+      debug_info.push_back({ .info = info, .flags = flags });
     });
   });
 
@@ -144,18 +156,41 @@ int main() {
 
   pile.loco.console.commands.add("clear_shapes", [](const fan::commands_t::arg_t& args) {
     shapes.clear();
-  }).description = "";
+  }).description = "clears all shapes within the program";
+
+  pile.loco.console.commands.add("print_debug", [&debug_info](const fan::commands_t::arg_t& args) {
+    for (const auto& i : debug_info) {
+      fan::printclh(i.flags, i.info);
+    }
+  }).description = "prints compile debug information";
 
   TextEditor editor, input;
   auto file_name = "test.fpp";
 
   init_graphics(editor, file_name);
 
+  code.tab_size = editor.GetTabSize();
+
   pile.loco.input_action.add_keycombo({ fan::key_left_control, fan::key_s }, "save_file");
   pile.loco.input_action.add_keycombo({ fan::key_f5 }, "compile_and_run");
 
-  auto compile_and_run = [&editor, &code] {
+  uint32_t task_id = 0, sleep_id = 0;
+
+  auto compile_and_run = [&editor, &code, &task_id, &sleep_id] {
+    if (processed != false) {
+      fan::printclh(loco_t::console_t::highlight_e::info, "Overriding active program");
+      task_id = 0;
+      sleep_id = 0;
+      processed = false;
+      clean_up();
+      shapes.clear();
+      images.clear();
+    }
+    fan::printclh(loco_t::console_t::highlight_e::info, "Compiling...");
     code.code_input = editor.GetText();
+    if (code.code_input.back() == '\n') {
+      code.code_input.pop_back();
+    }
     code.code_input.push_back(EOF);
 
     {
@@ -163,18 +198,16 @@ int main() {
       ready = true;
     }
     g_cv.notify_one();
-    };
-
-  uint32_t task_id = 0, sleep_id = 0;
+  };
 
   pile.loco.loop([&] {
     ImGui::Begin("window");
     ImGui::SameLine();
 
-    if (ImGui::Button("compile & run") && processed == false) {
-      compile_and_run();
-    }
-    if (pile.loco.input_action.is_active("compile_and_run") && processed == false) {
+    if (
+      (ImGui::Button("compile & run") ||
+      pile.loco.input_action.is_active("compile_and_run"))
+      ) {
       compile_and_run();
     }
     editor.Render("editor");
@@ -188,6 +221,11 @@ int main() {
     }
 
     if (processed) {
+      for (const auto& i : lib_queue) {
+        i();
+      }
+      lib_queue.clear();
+
       std::lock_guard<std::mutex> lk(task_queue_mutex);
       if (code_sleep) {
         if (sleep_timers[sleep_id].finished()) {

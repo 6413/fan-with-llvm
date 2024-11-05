@@ -33,7 +33,7 @@ int main() {
   code.code_input.push_back(EOF);
 
   code.set_debug_cb([](const std::string& info, int flags) {
-
+	printf("%s\n", info.c_str());
   });
 
   code.init_code();

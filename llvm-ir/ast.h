@@ -274,6 +274,30 @@ struct ast_t : lexer_t {
     }
   };
 
+  static PrototypeAST* CreateUnaryPrototype(char op, ast_t* ast) {
+    std::string Name = "unary";
+    Name += op;
+
+    // Arguments
+    std::vector<std::string> Args;
+    Args.push_back("operand");
+
+    // Argument types
+    std::vector<std::string> ArgTypes;
+    ArgTypes.push_back("double");  // Assuming operand is double type
+
+    // Create prototype with source location
+    //source_location_t loc = { 0, 0 };  // Or pass appropriate location
+    auto Proto = std::make_unique<PrototypeAST>(ast->cursor_location, Name, Args, ArgTypes,
+      /*IsOperator=*/true,
+      /*Precedence=*/40);
+
+    ast->FunctionProtos[Name] = std::move(Proto);
+    return ast->FunctionProtos[Name].get();
+  }
+
+
+
 #ifndef OFFSETLESS
 #define OFFSETLESS(ptr_m, t_m, d_m) \
 		((t_m *)((uint8_t *)(ptr_m) - offsetof(t_m, d_m)))
@@ -312,7 +336,14 @@ struct ast_t : lexer_t {
       return di_type;
     }
 
-    /// LogError* - These are little helper functions for error handling.
+    // this function expects to have source location in it
+    std::unique_ptr<ExprAST> LogError(const std::string& str) {
+      error_log += "Error: " + str;
+      compiled = false;
+      return nullptr;
+    }
+
+
     std::unique_ptr<ExprAST> LogError(const source_location_t& location, const std::string& str) {
       error_log += "Error: " + str + ", at " + 
         std::to_string(location.line) + ":" +
@@ -330,10 +361,21 @@ struct ast_t : lexer_t {
       LogError(location, str);
       return nullptr;
     }
+
+    void init() {
+      di_compile_unit = nullptr;
+      di_type = nullptr;
+      lexical_blocks = {};
+      compiled = true;
+      error_log.clear();
+    }
+
   }debug_info;
 
   /// BinopPrecedence - This holds the precedence for each binary operator that is
 /// defined.
+
+  // map bad - todo remove
   std::map<char, int> BinopPrecedence{
     {'=', 2},
     {'<', 10},
@@ -343,6 +385,9 @@ struct ast_t : lexer_t {
     {'*', 40},
     {'/', 40},
     { '%', 40 },
+    { '&', 5 },
+    { '|', 5 },
+    { '!', 50 },
   };
 
   std::map<std::string, std::unique_ptr<ast_t::PrototypeAST>> FunctionProtos;
