@@ -32,6 +32,9 @@ extern "C" DLLEXPORT double putchard(double x) {
 inline std::vector<loco_t::shape_t> shapes;
 // cache images
 inline std::unordered_map<std::string, loco_t::image_t> images;
+
+inline std::vector<fan::graphics::model_t> models;
+
 #endif
 
 /// printd - printf that takes a double prints it as "%f\n", returning 0.
@@ -121,6 +124,21 @@ extern "C" DLLEXPORT double sprite0(const char* cpath, double px, double py, dou
 #else
   return 0;
 #endif
+}
+
+extern "C" DLLEXPORT double model(const char* cpath, double px, double py, double pz, double scale) {
+#ifndef no_graphics
+  add_task([=, path = std::string(cpath)] {
+    fan::graphics::model_t::properties_t mp;
+    mp.path = path;
+    mp.model = mp.model.translate(fan::vec3(px, py, pz)).scale(scale);
+    models.push_back(mp);
+    gloco->m_post_draw.push_back([model_id = models.size() - 1] {
+      models[model_id].draw();
+    });
+  });
+#endif
+  return 0;
 }
 
 inline bool code_sleep = false;

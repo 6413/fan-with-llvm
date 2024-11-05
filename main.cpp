@@ -72,26 +72,8 @@ void init_graphics(TextEditor& editor, const char* file_name) {
     return;
   });
 
-  TextEditor::LanguageDefinition lang = TextEditor::LanguageDefinition::CPlusPlus();
-  static const char* ppnames[] = { "NULL" };
-
-  static const char* ppvalues[] = {
-    "#define NULL ((void*)0)",
-  };
-
-  for (int i = 0; i < sizeof(ppnames) / sizeof(ppnames[0]); ++i)
-  {
-    TextEditor::Identifier id;
-    id.mDeclaration = ppvalues[i];
-    lang.mPreprocIdentifiers.insert(std::make_pair(std::string(ppnames[i]), id));
-  }
-
-  editor.SetLanguageDefinition(lang);
-
-  auto palette = editor.GetPalette();
-
-  palette[(int)TextEditor::PaletteIndex::Background] = 0xff202020;
-  editor.SetPalette(palette);
+  editor.ignore_comments = false;
+  editor.SetLanguageDefinition(TextEditor::LanguageDefinition::CPlusPlus());
   editor.SetPalette(editor.GetRetroBluePalette());
   editor.SetTabSize(2);
   editor.SetShowWhitespaces(false);
@@ -177,6 +159,9 @@ int main() {
   uint32_t task_id = 0, sleep_id = 0;
 
   auto compile_and_run = [&editor, &code, &task_id, &sleep_id] {
+    models.clear();
+    gloco->m_post_draw.clear();
+
     if (processed != false) {
       fan::printclh(loco_t::console_t::highlight_e::info, "Overriding active program");
       task_id = 0;
@@ -199,8 +184,9 @@ int main() {
     }
     g_cv.notify_one();
   };
-
+  auto& camera = gloco->camera_get(gloco->perspective_camera.camera);
   pile.loco.loop([&] {
+    camera.move(100);
     ImGui::Begin("window");
     ImGui::SameLine();
 
