@@ -103,7 +103,9 @@ void t0(code_t& code) {
   code.recompile_code();
   uint64_t compile_time = c.elapsed();
 
+  gloco->set_current(&gloco->window);
   code.run_code();
+  gloco->set_current(nullptr);
 
   lib_queue.push_back([elapsed = c.elapsed(), compile_time] {
     fan::printclh(loco_t::console_t::highlight_e::success, "Compile time: ", compile_time / 1e6, "ms");
@@ -127,7 +129,12 @@ int main() {
   std::vector<debug_info_t> debug_info;
   code.set_debug_cb([&debug_info](const std::string& info, int flags) {
     lib_queue.push_back([=, &debug_info] {
-      debug_info.push_back({ .info = info, .flags = flags });
+      if (flags != 1) { // err 
+        debug_info.push_back({ .info = info, .flags = flags });
+      }
+      else {
+        fan::printclh(loco_t::console_t::highlight_e::error, info);
+      }
     });
   });
 
@@ -160,7 +167,7 @@ int main() {
 
   auto compile_and_run = [&editor, &code, &task_id, &sleep_id] {
     models.clear();
-    gloco->m_post_draw.clear();
+    gloco->m_pre_draw.clear();
 
     if (processed != false) {
       fan::printclh(loco_t::console_t::highlight_e::info, "Overriding active program");
@@ -171,6 +178,7 @@ int main() {
       shapes.clear();
       images.clear();
     }
+    gloco->set_current(0);
     fan::printclh(loco_t::console_t::highlight_e::info, "Compiling...");
     code.code_input = editor.GetText();
     if (code.code_input.back() == '\n') {
@@ -183,10 +191,26 @@ int main() {
       ready = true;
     }
     g_cv.notify_one();
+    while(ready) {}
+    gloco->set_current(&gloco->window);
   };
+
   auto& camera = gloco->camera_get(gloco->perspective_camera.camera);
+
+  bool window_focused = false;
+
+  fan::vec2 motion = 0;
+  pile.loco.window.add_mouse_motion([&](const auto& d) {
+    if (window_focused == false) {
+      return;
+    }
+    motion = d.motion;
+    if (ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
+      camera.rotate_camera(d.motion);
+    }
+  });
+
   pile.loco.loop([&] {
-    camera.move(100);
     ImGui::Begin("window");
     ImGui::SameLine();
 
@@ -199,7 +223,17 @@ int main() {
     editor.Render("editor");
     ImGui::End();
     ImGui::Begin("Content");
+    if (window_focused = ImGui::IsWindowFocused()) {
+      camera.move(100);
+    }
     pile.loco.set_imgui_viewport(pile.loco.orthographic_camera.viewport);
+    fan::vec2 viewport_size = ImGui::GetContentRegionAvail();
+    pile.loco.camera_set_ortho(
+      pile.loco.orthographic_camera.camera,
+      fan::vec2(0, viewport_size.x),
+      fan::vec2(0, viewport_size.y)
+    );
+
     ImGui::End();
     if (pile.loco.input_action.is_active("save_file")) {
       std::string str = editor.GetText();
@@ -212,26 +246,26 @@ int main() {
       }
       lib_queue.clear();
 
-      std::lock_guard<std::mutex> lk(task_queue_mutex);
-      if (code_sleep) {
-        if (sleep_timers[sleep_id].finished()) {
-          ++sleep_id;
-          code_sleep = false;
-        }
-      }
-      for (uint32_t i = task_id; code_sleep == false && i < task_queue.size(); ++i) {
-        task_queue[task_id++]();
-        if (code_sleep) {
-          sleep_timers[sleep_id].start();
-          break;
-        }
-      }
-      if (task_id == task_queue.size()) {
-        task_id = 0;
-        processed = false;
-        sleep_id = 0;
-        clean_up();
-      }
+      //std::lock_guard<std::mutex> lk(task_queue_mutex);
+      //if (code_sleep) {
+      //  if (sleep_timers[sleep_id].finished()) {
+      //    ++sleep_id;
+      //    code_sleep = false;
+      //  }
+      //}
+      //for (uint32_t i = task_id; code_sleep == false && i < task_queue.size(); ++i) {
+      //  task_queue[task_id++]();
+      //  if (code_sleep) {
+      //    sleep_timers[sleep_id].start();
+      //    break;
+      //  }
+      //}
+      //if (task_id == task_queue.size()) {
+      //  task_id = 0;
+      //  processed = false;
+      //  sleep_id = 0;
+      //  clean_up();
+      //}
     }
 
   });
