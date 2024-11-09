@@ -102,7 +102,7 @@ void t0(code_t& code) {
 
   code.recompile_code();
   uint64_t compile_time = c.elapsed();
-
+  //std::cout << code.debug_info.
   gloco->set_current(&gloco->window);
   code.run_code();
   gloco->set_current(nullptr);
@@ -178,9 +178,9 @@ int main() {
       shapes.clear();
       images.clear();
     }
-    gloco->set_current(0);
     fan::printclh(loco_t::console_t::highlight_e::info, "Compiling...");
     code.code_input = editor.GetText();
+    gloco->set_current(0);
     if (code.code_input.back() == '\n') {
       code.code_input.pop_back();
     }
