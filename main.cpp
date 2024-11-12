@@ -87,10 +87,7 @@ void init_graphics(TextEditor& editor, const char* file_name) {
   editor.SetText(str);
 }
 
-std::mutex g_mutex;
-std::condition_variable g_cv;
-bool ready = false;
-bool processed = false;
+bool ready = false, processed = false;
 
 void t0(code_t& code) {
   std::unique_lock lk(g_mutex);
@@ -102,10 +99,7 @@ void t0(code_t& code) {
 
   code.recompile_code();
   uint64_t compile_time = c.elapsed();
-  //std::cout << code.debug_info.
-  gloco->set_current(&gloco->window);
   code.run_code();
-  gloco->set_current(nullptr);
 
   lib_queue.push_back([elapsed = c.elapsed(), compile_time] {
     fan::printclh(loco_t::console_t::highlight_e::success, "Compile time: ", compile_time / 1e6, "ms");
@@ -166,21 +160,11 @@ int main() {
   uint32_t task_id = 0, sleep_id = 0;
 
   auto compile_and_run = [&editor, &code, &task_id, &sleep_id] {
+
     models.clear();
     gloco->m_pre_draw.clear();
-
-    if (processed != false) {
-      fan::printclh(loco_t::console_t::highlight_e::info, "Overriding active program");
-      task_id = 0;
-      sleep_id = 0;
-      processed = false;
-      clean_up();
-      shapes.clear();
-      images.clear();
-    }
     fan::printclh(loco_t::console_t::highlight_e::info, "Compiling...");
     code.code_input = editor.GetText();
-    gloco->set_current(0);
     if (code.code_input.back() == '\n') {
       code.code_input.pop_back();
     }
@@ -191,14 +175,12 @@ int main() {
       ready = true;
     }
     g_cv.notify_one();
-    while(ready) {}
-    gloco->set_current(&gloco->window);
   };
 
   auto& camera = gloco->camera_get(gloco->perspective_camera.camera);
 
   bool window_focused = false;
-
+  //
   fan::vec2 motion = 0;
   pile.loco.window.add_mouse_motion([&](const auto& d) {
     if (window_focused == false) {
@@ -211,6 +193,15 @@ int main() {
   });
 
   pile.loco.loop([&] {
+
+    {
+      std::lock_guard<std::mutex> lock(task_queue_mutex);
+      for (auto& i : task_queue) {
+        i();
+      }
+      task_queue.clear();
+    }
+
     ImGui::Begin("window");
     ImGui::SameLine();
 
